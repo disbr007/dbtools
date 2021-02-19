@@ -1,0 +1,21 @@
+{
+  "hosts":
+  {
+    "danco": {
+      "host": "danco.pgc.umn.edu",
+      "databases": [
+        "footprint",
+        "imagery"
+      ]
+    },
+    "sandwich": {
+      "host": "sandwich-pool.pgc.umn.edu",
+      "databases": [
+        "planet",
+        "dem"
+      ]
+    }
+  },
+  "global_user": "disbr007",
+  "global_password": "1nil2theARSENALfc"
+}
