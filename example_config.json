@@ -1,0 +1,23 @@
+{
+  "hosts":
+  {
+    "shortname1": {
+      "host": "my.host.com",
+      "databases": [
+        "db1",
+        "db2"
+      ]
+    },
+    "canBeAnything": {
+      "host": "another.host.com",
+      "databases": [
+        "db1",
+        "db2"
+      ],
+      "user": "thisOneTakesPriorityForThisHost",
+      "password": "asDoesThis"
+    }
+  },
+  "global_user": "usedIfNoHostSpecific",
+  "global_password": "*********"
+}
