@@ -131,18 +131,18 @@ def make_identifier(sql_str):
 def generate_sql(layer, columns=None, where=None, orderby=False,
                  orderby_asc=False, distinct=False, limit=False, offset=None,
                  geom_col=None, encode_geom_col_as='geometry', remove_id_tbl=None,
-                 remove_id_tbl_col=None, remove_id_src_cols=None):
+                 remove_id_tbl_col=None, remove_id_src_col=None):
     """
+    TODO: Docstring
     geom_col not needed for PostGIS if loading SQL with geopandas -
         gpd can interpet the geometry column without encoding
     """
-    if isinstance(columns, str):
-        columns = [columns]
     if distinct:
         sql_select = 'SELECT DISTINCT'
     else:
         sql_select = "SELECT"
-
+    if isinstance(columns, str):
+        columns = [columns]
     if columns is not None:
         fields = sql.SQL(',').join([sql.Identifier(f) for f in columns])
     else:
@@ -151,11 +151,12 @@ def generate_sql(layer, columns=None, where=None, orderby=False,
     # Only necessary for geometries in non-PostGIS DBs
     if geom_col:  # TODO: do not append to columns?
         # Create base query object, with geometry encoding
-        geom_encode = "encode(ST_AsBinary({}), 'hex') AS {}".format(geom_col, encode_geom_col_as)
-        query = sql.SQL("{select} {fields}, {geom_encode} FROM {table}").format(
+        geom_encode_str = encode_geom_sql(geom_col=geom_col, encode_geom_col=encode_geom_col_as)
+        # geom_encode_str = "encode(ST_AsBinary({}), 'hex') AS {}".format(geom_col, encode_geom_col_as)
+        query = sql.SQL("{select} {fields}, {geom_encode_str} FROM {table}").format(
             select=sql.SQL(sql_select),
             fields=fields,
-            geom_encode=sql.SQL(geom_encode),
+            geom_encode_str=sql.SQL(geom_encode_str),
             table=sql.Identifier(layer))
     else:
         # Create base query object
@@ -165,13 +166,13 @@ def generate_sql(layer, columns=None, where=None, orderby=False,
             table=sql.Identifier(layer))
 
     # Add any provided additional parameters
-
-    if all([remove_id_tbl, remove_id_tbl_col, remove_id_src_cols]):
+    # Drop records that have ID in other table
+    if all([remove_id_tbl, remove_id_tbl_col, remove_id_src_col]):
         join_stmt = "LEFT JOIN {0} " \
                     "ON {0}.{1} = {2}.{3}".format(remove_id_tbl,
                                                   remove_id_tbl_col,
                                                   layer,
-                                                  remove_id_src_cols)
+                                                  remove_id_src_col)
         query += sql.SQL(join_stmt)
         join_where = "{}.{} IS NULL".format(remove_id_tbl,
                                             remove_id_tbl_col)
@@ -231,10 +232,6 @@ class Postgres(object):
 
     def __init__(self, host, database):
         self.db_config = get_db_config(host, database)
-        # self.host = host
-        # self.database = database
-        # self.user = user
-        # self.password = password
         self._connection = None
         self._cursor = None
 
@@ -368,14 +365,14 @@ class Postgres(object):
 
         return columns
 
-    def get_values(self, table, columns, distinct=False):
+    def get_values(self, table, columns, distinct=False, where=None):
         """Get values in the passed columns(s) in the passed table. If
         distinct, unique values returned (across all columns passed)"""
         if isinstance(columns, str):
             columns = [columns]
 
         sql_statement = generate_sql(layer=table, columns=columns,
-                                     distinct=distinct,)
+                                     distinct=distinct, where=where)
         values = self.execute_sql(sql_statement)
 
         # Convert from list of tuples to flat list if only one column
