@@ -131,7 +131,7 @@ def make_identifier(sql_str):
 def generate_sql(layer, columns=None, where=None, orderby=False,
                  orderby_asc=False, distinct=False, limit=False, offset=None,
                  geom_col=None, encode_geom_col_as='geometry', remove_id_tbl=None,
-                 remove_id_tbl_col=None, remove_id_src_col=None):
+                 remove_id_tbl_cols=None, remove_id_src_cols=None):
     """
     TODO: Docstring
     geom_col not needed for PostGIS if loading SQL with geopandas -
@@ -167,19 +167,36 @@ def generate_sql(layer, columns=None, where=None, orderby=False,
 
     # Add any provided additional parameters
     # Drop records that have ID in other table
-    if all([remove_id_tbl, remove_id_tbl_col, remove_id_src_col]):
-        join_stmt = "LEFT JOIN {0} " \
-                    "ON {0}.{1} = {2}.{3}".format(remove_id_tbl,
-                                                  remove_id_tbl_col,
-                                                  layer,
-                                                  remove_id_src_col)
-        query += sql.SQL(join_stmt)
+    if all([remove_id_tbl, remove_id_tbl_cols, remove_id_src_cols]):
+        if not len(remove_id_tbl_cols) == len(remove_id_src_cols):
+            logger.error('Error creating LEFT JOIN clause: '
+                         'length of remove_id_tbl_cols ({}) != '
+                         'length of remove_ids_src_cols ({})'.format(len(remove_id_tbl_cols),
+                                                                     len(remove_id_src_cols)))
+            # TODO: custom exception
+            raise Exception
+        jss = []
+        for i, col in enumerate(remove_id_tbl_cols):
+            js = "{0}.{1} = {2}.{3}".format(remove_id_tbl, col, layer,
+                                            remove_id_src_cols[i])
+            jss.append(js)
+
+        join_stmts = " AND ".join(jss)
+        join_stmts = " LEFT JOIN {} ON {}".format(remove_id_tbl,
+                                                  join_stmts)
+        # join_stmt = "LEFT JOIN {0} " \
+        #             "ON {0}.{1} = {2}.{3}".format(remove_id_tbl,
+        #                                           remove_id_tbl_cols,
+        #                                           layer,
+        #                                           remove_id_src_cols)
+
         join_where = "{}.{} IS NULL".format(remove_id_tbl,
-                                            remove_id_tbl_col)
+                                            remove_id_tbl_cols[0])
+        query += sql.SQL(join_stmts)
         if where is not None:
             where = '{} AND {}'.format(join_where, where)
         else:
-            where = join_stmt
+            where = join_stmts
     if where:
         sql_where = " WHERE {}".format(where)
         query += sql.SQL(sql_where)
@@ -335,11 +352,11 @@ class Postgres(object):
     def get_sql_count(self, sql_str):
         """Get count of records returned by passed query. Query should
         not have COUNT() in it already."""
-        if not isinstance(sql_str, sql.SQL):
+        if not isinstance(sql_str, (sql.SQL, sql.Composed)):
             sql_str = sql.SQL(sql_str)
         count_sql = sql.SQL(re.sub('SELECT (.*) FROM',
-                                   'SELECT COUNT(\\1) FROM',
-                                   sql_str.string))
+                                   'SELECT COUNT(*) FROM',
+                                   sql_str.as_string(self.connection)))
         logger.debug('Count sql: {}'.format(count_sql))
         self.cursor.execute(count_sql)
         count = self.cursor.fetchall()[0][0]
@@ -573,3 +590,6 @@ class Postgres(object):
         logger.info('New count for {}.{}: '
                     '{:,}'.format(self.database, table,
                                   self.get_table_count(table)))
+
+# TOOD: Create SQLQuery class
+#   - .select .where .fields .join etc.
