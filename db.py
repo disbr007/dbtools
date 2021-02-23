@@ -10,6 +10,7 @@ from psycopg2 import sql
 import shapely
 from shapely.geometry import Point
 from sqlalchemy import create_engine
+# TODO: remove tqdm
 from tqdm import tqdm
 
 from .logging_utils import create_logger
@@ -133,7 +134,6 @@ def generate_sql(layer, columns=None, where=None, orderby=False,
                  geom_col=None, encode_geom_col_as='geometry', remove_id_tbl=None,
                  remove_id_tbl_cols=None, remove_id_src_cols=None):
     """
-    TODO: Docstring
     geom_col not needed for PostGIS if loading SQL with geopandas -
         gpd can interpet the geometry column without encoding
     """
@@ -168,6 +168,10 @@ def generate_sql(layer, columns=None, where=None, orderby=False,
     # Add any provided additional parameters
     # Drop records that have ID in other table
     if all([remove_id_tbl, remove_id_tbl_cols, remove_id_src_cols]):
+        if isinstance(remove_id_src_cols, str):
+            remove_id_src_cols = [remove_id_src_cols]
+        if isinstance(remove_id_tbl_cols, str):
+            remove_id_tbl_cols = [remove_id_tbl_cols]
         if not len(remove_id_tbl_cols) == len(remove_id_src_cols):
             logger.error('Error creating LEFT JOIN clause: '
                          'length of remove_id_tbl_cols ({}) != '
@@ -221,6 +225,9 @@ def generate_sql(layer, columns=None, where=None, orderby=False,
     return query
 
 
+def add2sql(sql_str):
+    pass
+
 def intersect_aoi_where(aoi, geom_col):
     """
     Create a where statement for a PostGIS intersection between the
@@ -247,7 +254,7 @@ class Postgres(object):
     """
     _instance = None
 
-    def __init__(self, host, database):
+    def __init__(self, host, database,):
         self.db_config = get_db_config(host, database)
         self._connection = None
         self._cursor = None

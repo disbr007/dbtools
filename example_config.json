@@ -1,23 +1,23 @@
 {
   "hosts":
   {
-    "shortname1": {
-      "host": "my.host.com",
+    "danco": {
+      "host": "danco.pgc.umn.edu",
       "databases": [
-        "db1",
-        "db2"
+        "footprint",
+        "imagery"
       ]
     },
-    "canBeAnything": {
-      "host": "another.host.com",
+    "sandwich": {
+      "host": "sandwich-pool.pgc.umn.edu",
       "databases": [
-        "db1",
-        "db2"
+        "planet",
+        "dem",
+        "dgarchive"
       ],
-      "user": "thisOneTakesPriorityForThisHost",
-      "password": "asDoesThis"
+      "sslmode": "require"
     }
   },
-  "global_user": "usedIfNoHostSpecific",
-  "global_password": "*********"
+  "global_user": "disbr007",
+  "global_password": "******"
 }
