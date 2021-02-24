@@ -1,6 +1,6 @@
 #### db_utils
-Tools for interacting with databases, specifically tested for PostgreSQL 
-and PostgreSQL/PostGIS databases.
+Tools for interacting with databases, specifically tested for 
+PostgreSQL and PostgreSQL/PostGIS databases.
 
 ### Set Up
 Create a copy of the `example_config.json` file and rename it to
@@ -34,7 +34,7 @@ specified within a given host's config, for example:
   "global_user": "disbr007",
   "global_password": "******"
 }
-``` 
+```
 
 ### Usage
 *Coming soon...*

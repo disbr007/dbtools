@@ -21,6 +21,10 @@ logger = create_logger(__name__, 'sh', 'INFO')
 pd.set_option('mode.chained_assignment', None)
 
 CONFIG_FILE = Path(__file__).parent / "config.json"
+if not CONFIG_FILE.exists():
+    logger.error('config.json not found. Should be created at: '
+                 '{}'.format(CONFIG_FILE))
+    sys.exit(-1)
 
 # Config keys
 HOSTS = 'hosts'
@@ -34,6 +38,7 @@ DATABASE = 'database'
 
 
 def get_db_config(host_name, db_name):
+    # TODO: validate config entries
     if not CONFIG_FILE.exists():
         logger.error('Config file not found at: {}'.format(CONFIG_FILE))
         logger.error('Please create a config.json file based on the example.')
@@ -228,6 +233,7 @@ def generate_sql(layer, columns=None, where=None, orderby=False,
 def add2sql(sql_str):
     pass
 
+
 def intersect_aoi_where(aoi, geom_col):
     """
     Create a where statement for a PostGIS intersection between the
@@ -254,8 +260,10 @@ class Postgres(object):
     """
     _instance = None
 
-    def __init__(self, host, database,):
+    def __init__(self, host, database):
         self.db_config = get_db_config(host, database)
+        self.host = host
+        self.database = database
         self._connection = None
         self._cursor = None
 
@@ -414,7 +422,7 @@ class Postgres(object):
                                             geom_col=geom_col, crs=crs)
         return gdf
 
-    def sql2df(self, sql_str, columns=None):
+    def sql2df(self, sql_str, columns=None, **kwargs):
         """Get a DataFrame from a passed SQL query"""
         if isinstance(sql_str, sql.Composed):
             sql_str = sql_str.as_string(self.connection)
@@ -422,11 +430,12 @@ class Postgres(object):
             columns = [columns]
 
         df = pd.read_sql(sql=sql_str, con=self.get_engine().connect(),
-                         columns=columns)
+                         columns=columns, **kwargs)
 
         return df
 
-    def insert_new_records(self, records, table, dryrun=False):
+    def insert_new_records(self, records, table, unique_on=None,
+                           dryrun=False):
         """
         Add records to table, converting data types as necessary for INSERT.
         Optionally using a unique_id (or combination of columns) to skip
@@ -470,13 +479,10 @@ class Postgres(object):
             return
 
         # Check if table exists, get table starting count, unique constraint
-        unique_on = None
         logger.info('Inserting records into {}...'.format(table))
         if table in self.list_db_tables():
             logger.info('Starting count for {}: '
                         '{:,}'.format(table, self.get_table_count(table)))
-            # TODO: Determine unique ID from table itself
-            # unique_on = tables_config[table][k_unique_id]
         else:
             logger.warning('Table "{}" not found in database "{}", '
                            'exiting.'.format(table, self.database))
@@ -576,14 +582,14 @@ class Postgres(object):
                     except Exception as e:
                         if e == psycopg2.errors.UniqueViolation:
                             logger.warning('Skipping due to unique violation '
-                                           'for scene: '
-                                           '{}'.format(row[unique_on]))
+                                           'for record: '
+                                           '{}'.format(row))
                             logger.warning(e)
                             self.connection.rollback()
                         elif e == psycopg2.errors.IntegrityError:
                             logger.warning('Skipping due to integrity error '
-                                           'for scene: '
-                                           '{}'.format(row[unique_on]))
+                                           'for record: '
+                                           '{}'.format(row))
                             logger.warning(e)
                             self.connection.rollback()
                         else:
