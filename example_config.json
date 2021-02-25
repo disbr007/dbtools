@@ -15,7 +15,9 @@
         "dem",
         "dgarchive"
       ],
-      "sslmode": "require"
+      "sslmode": "require",
+      "user": "this_is_used_first",
+      "password": "***as_is_this***"
     }
   },
   "global_user": "disbr007",
