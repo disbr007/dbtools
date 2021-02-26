@@ -56,7 +56,7 @@ with Postgres([host_name], [database_name]) as db_src:
 For non-PostGIS spatial databases, the geometry must be encoded in 
 order to be converted to a GeoDataFrame:
 ```python
-with Postgres(*host_name*, [database_name]) as db_src:
+with Postgres([host_name], [database_name]) as db_src:
     sql_str = generate_sql([table], 
                             geom_col=[table_geometry_column], 
                             encode_geom_col_as='geometry')

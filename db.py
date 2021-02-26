@@ -1,6 +1,6 @@
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePath
 import sys
 
 import geopandas as gpd
@@ -37,14 +37,21 @@ PASSWORD = 'password'
 DATABASE = 'database'
 
 
-def get_db_config(host_name, db_name):
+def get_db_config(host_name, db_name, config_file=CONFIG_FILE):
     # TODO: validate config entries
-    if not CONFIG_FILE.exists():
-        logger.error('Config file not found at: {}'.format(CONFIG_FILE))
+    if not isinstance(config_file, PurePath):
+        config_file = Path(config_file)
+    if not config_file.exists():
+        logger.error('Config file not found at: {}'.format(config_file))
         logger.error('Please create a config.json file based on the example.')
         raise FileNotFoundError
 
-    config = json.load(open(CONFIG_FILE))
+    try:
+        config = json.load(open(config_file))
+    except json.decoder.JSONDecodeError as e:
+        logger.error('Error loading config file: {}'.format(config_file))
+        logger.error(e)
+        sys.exit(-1)
 
     # Locate host
     host_short_names = config[HOSTS].keys()
@@ -154,7 +161,7 @@ def generate_sql(layer, columns=None, where=None, orderby=False,
         fields = sql.SQL('*')
 
     # Only necessary for geometries in non-PostGIS DBs
-    if geom_col:  # TODO: do not append to columns?
+    if geom_col:
         # Create base query object, with geometry encoding
         geom_encode_str = encode_geom_sql(geom_col=geom_col, encode_geom_col=encode_geom_col_as)
         # geom_encode_str = "encode(ST_AsBinary({}), 'hex') AS {}".format(geom_col, encode_geom_col_as)
@@ -274,12 +281,12 @@ class Postgres(object):
             try:
                 self._connection = psycopg2.connect(**self.db_config)
 
-            except psycopg2.Error as error:
+            except (psycopg2.Error, psycopg2.OperationalError) as error:
                 Postgres._instance = None
                 logger.error('Error connecting to {database} at '
                              '{host}'.format(**self.db_config))
                 logger.error(error)
-                raise error
+                sys.exit(-1)
             else:
                 logger.debug('Connection to {database} at {host} '
                              'established.'.format(**self.db_config))
@@ -494,8 +501,8 @@ class Postgres(object):
             # columns
             existing_ids = self.get_values(table=table, columns=unique_on,
                                            distinct=True)
-            logger.debug('Removing any existing IDs from search results...')
-            logger.debug('Existing unique IDs in table "{}": '
+            logger.info('Removing any existing IDs from search results...')
+            logger.info('Existing unique IDs in table "{}": '
                          '{:,}'.format(table, len(existing_ids)))
 
             # Remove dups
@@ -503,11 +510,13 @@ class Postgres(object):
             records = records[~records.apply(lambda x: _row_columns_unique(
                 x, unique_on, existing_ids), axis=1)]
             if len(records) != starting_count:
-                logger.info('Duplicates removed: {}'.format(starting_count -
-                                                            len(records)))
+                logger.info('Duplicates removed: {:,}'.format(starting_count -
+                                                              len(records)))
+            else:
+                logger.info('No duplicates found.')
         logger.info('IDs to add: {:,}'.format(len(records)))
         if len(records) == 0:
-            logger.info('No new records, skipping indexing.')
+            logger.info('No new records, skipping INSERT.')
             return
 
         geom_cols = get_geometry_cols(records)
@@ -518,6 +527,8 @@ class Postgres(object):
             geom_cols = []
 
         # Insert new records
+        if dryrun:
+            logger.info('--dryrun--')
         if len(records) != 0:
             logger.info('Writing new records to {}.{}: '
                         '{:,}'.format(self.database, table, len(records)))
@@ -526,11 +537,11 @@ class Postgres(object):
                                desc='Adding new records to: {}'.format(table),
                                total=len(records)):
                 if dryrun:
-                    if i == 0:
-                        logger.info('-dryrun-')
+                    # if i == 0:
+                    #     logger.info('-dryrun-')
                     continue
 
-                # Format the INSERT query
+                # Format the INSERT statement
                 columns = [sql.Identifier(c) for c in row.index if c not in
                            geom_cols]
                 if geom_cols:
