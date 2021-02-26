@@ -37,4 +37,28 @@ specified within a given host's config, for example:
 ```
 
 ### Usage
-*Coming soon...*
+Basic usage:
+```python
+with Postgres([host_name], [database_name]) as db_src:
+    sql_str = "SELECT * FROM [table]"
+    results = db_src.execute_sql(sql_str)
+```
+
+Results can also be converted directly to a pandas DataFrame 
+or geopandas GeoDataFrame (assuming PostGIS database for this example):
+```python
+with Postgres([host_name], [database_name]) as db_src:
+    sql_str = "SELECT * FROM [table]"
+    df = db_src.sql2df(sql_str)
+    gdf = db_src.sql2gdf(sql_str)
+```
+
+For non-PostGIS spatial databases, the geometry must be encoded in 
+order to be converted to a GeoDataFrame:
+```python
+with Postgres(*host_name*, [database_name]) as db_src:
+    sql_str = generate_sql([table], 
+                            geom_col=[table_geometry_column], 
+                            encode_geom_col_as='geometry')
+    gdf = db_src.sql2gdf(sql_str)
+```
