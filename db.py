@@ -10,7 +10,6 @@ from psycopg2 import sql
 import shapely
 from shapely.geometry import Point
 from sqlalchemy import create_engine
-# TODO: remove tqdm
 from tqdm import tqdm
 
 from .logging_utils import create_logger
@@ -65,8 +64,7 @@ def get_db_config(host_name, db_name, config_file=CONFIG_FILE):
                 break
     else:
         logger.error('Config for host "{}" not found.'.format(host_name))
-        # TODO: Custom error
-        raise
+        raise KeyError
     # Confirm database is listed in host's config
     databases = db_config.pop(DATABASES)
     if db_name in databases:
@@ -189,7 +187,6 @@ def generate_sql(layer, columns=None, where=None, orderby=False,
                          'length of remove_id_tbl_cols ({}) != '
                          'length of remove_ids_src_cols ({})'.format(len(remove_id_tbl_cols),
                                                                      len(remove_id_src_cols)))
-            # TODO: custom exception
             raise Exception
         jss = []
         for i, col in enumerate(remove_id_tbl_cols):
@@ -390,7 +387,7 @@ class Postgres(object):
         if not isinstance(table, sql.Identifier):
             table = sql.Identifier(table)
         self.cursor.execute(sql.SQL(
-            """SELECT COUNT(*) FROM {}""").format(table))
+            "SELECT COUNT(*) FROM {}".format(table)))
         count = self.cursor.fetchall()[0][0]
         logger.debug('{} count: {:,}'.format(table, count))
 
@@ -399,7 +396,7 @@ class Postgres(object):
     def get_table_columns(self, table):
         """Get columns in passed table."""
         self.cursor.execute(sql.SQL(
-            "SELECT * FROM {} LIMIT 0").format(sql.Identifier(table)))
+            "SELECT * FROM {} LIMIT 0".format(sql.Identifier(table))))
         columns = [d[0] for d in self.cursor.description]
 
         return columns
@@ -452,7 +449,7 @@ class Postgres(object):
         table : str
             Name of table to be inserted into
         """
-        # TODO: Create overwrite scenes option that removes any scenes in the
+        # TODO: Create overwrite records option that removes any scenes in the
         #  input from the DB before writing them
 
         def _row_columns_unique(row, unique_on, values):
@@ -501,8 +498,8 @@ class Postgres(object):
             # columns
             existing_ids = self.get_values(table=table, columns=unique_on,
                                            distinct=True)
-            logger.info('Removing any existing IDs from search results...')
-            logger.info('Existing unique IDs in table "{}": '
+            logger.info('Removing any existing records from search results...')
+            logger.info('Existing unique records in table "{}": '
                          '{:,}'.format(table, len(existing_ids)))
 
             # Remove dups
@@ -514,7 +511,7 @@ class Postgres(object):
                                                               len(records)))
             else:
                 logger.info('No duplicates found.')
-        logger.info('IDs to add: {:,}'.format(len(records)))
+        logger.info('Records to add: {:,}'.format(len(records)))
         if len(records) == 0:
             logger.info('No new records, skipping INSERT.')
             return
@@ -537,8 +534,6 @@ class Postgres(object):
                                desc='Adding new records to: {}'.format(table),
                                total=len(records)):
                 if dryrun:
-                    # if i == 0:
-                    #     logger.info('-dryrun-')
                     continue
 
                 # Format the INSERT statement
@@ -615,5 +610,5 @@ class Postgres(object):
                     '{:,}'.format(self.database, table,
                                   self.get_table_count(table)))
 
-# TOOD: Create SQLQuery class
+# TODO: Create SQLQuery class
 #   - .select .where .fields .join etc.
