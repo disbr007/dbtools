@@ -500,22 +500,39 @@ class Postgres(object):
         # Get unique IDs to remove duplicates if provided
         # if table in self.list_db_tables() and unique_on is not None:
         if unique_on is not None:
-            # if len(unique_on) == 1 or isinstance(unique_on, str):
-            #     if len(unique_on) == 1:
-            #         unique_on = unique_on[0]
-            #     get_existing_sql = "SELECT {}"
-            # Remove duplicate values from rows to insert based on unique_on
-            # columns
-            logger.info('Removing any existing records from search results...')
-            existing_ids = self.get_values(table=table, columns=unique_on,
-                                           distinct=True)
-            logger.info('Existing unique records in table "{}": '
-                         '{:,}'.format(table, len(existing_ids)))
-
-            # Remove dups
             starting_count = len(records)
-            records = records[~records.apply(lambda x: _row_columns_unique(
-                x, unique_on, existing_ids), axis=1)]
+            # Remove duplicates/existing records based on single column, this
+            # is done on the database side by selecting any records from the
+            # destination table that have an ID in common with the rows to be
+            # added.
+            if len(unique_on) == 1 or isinstance(unique_on, str):
+                if len(unique_on) == 1:
+                    unique_on = unique_on[0]
+                records_ids = list(records[unique_on])
+                get_existing_sql = f"SELECT {unique_on} FROM {table} WHERE {unique_on} IN ({str(records_ids)[1:-1]})"
+                logger.debug(get_existing_sql)
+                already_in_table = self.sql2df(get_existing_sql)
+                logger.info('Duplicate records found: {:,}'.format(len(already_in_table)))
+                if len(already_in_table) != 0:
+                    logger.info('Removing duplicates...')
+                    records = records[~records[unique_on].isin(already_in_table[unique_on])]
+                # Remove duplicates
+            else:
+                # Remove duplicate values from rows to insert based on multiple
+                # columns.
+                # TODO: Rewrite this to be done on the database side, maybe:
+                #  "WHERE column1 IN records[column1] AND
+                #  column2 IN records[column2] AND..
+                logger.info('Removing any existing records from search results...')
+                existing_ids = self.get_values(table=table, columns=unique_on,
+                                               distinct=True)
+                logger.info('Existing unique records in table "{}": '
+                             '{:,}'.format(table, len(existing_ids)))
+
+                # Remove dups
+                starting_count = len(records)
+                records = records[~records.apply(lambda x: _row_columns_unique(
+                    x, unique_on, existing_ids), axis=1)]
             if len(records) != starting_count:
                 logger.info('Duplicates removed: {:,}'.format(starting_count -
                                                               len(records)))
