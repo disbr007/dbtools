@@ -323,6 +323,8 @@ class Postgres(object):
 
     def list_db_tables(self):
         """List all tables in the database."""
+        # TODO: Add support for fully qualified table/view/mat_view names
+        #  i.e. db.schema.table
         logger.debug('Listing tables...')
         tables_sql = sql.SQL("""SELECT table_schema as schema_name,
                                        table_name as view_name
@@ -384,8 +386,8 @@ class Postgres(object):
 
     def get_table_count(self, table):
         """Get total count for the passed table."""
-        if not isinstance(table, sql.Identifier):
-            table = sql.Identifier(table)
+        # if not isinstance(table, sql.Identifier):
+        #     table = sql.Identifier(table)
         self.cursor.execute(sql.SQL(
             "SELECT COUNT(*) FROM {}".format(table)))
         count = self.cursor.fetchall()[0][0]
@@ -484,21 +486,29 @@ class Postgres(object):
 
         # Check if table exists, get table starting count, unique constraint
         logger.info('Inserting records into {}...'.format(table))
-        if table in self.list_db_tables():
-            logger.info('Starting count for {}: '
-                        '{:,}'.format(table, self.get_table_count(table)))
-        else:
-            logger.warning('Table "{}" not found in database "{}", '
-                           'exiting.'.format(table, self.database))
-            sys.exit()
+        if table not in self.list_db_tables():
+            logger.warning('Table "{}" not found in database "{}" '
+                           'If a fully qualified table name was provided '
+                           '(i.e. db.schema.table_name) this message may be '
+                           'displayed in error. Support for checking for '
+                           'presence of tables using fully qualified names '
+                           'under development.'.format(table, self.database))
+
+        logger.info('Starting count for {}: '
+                    '{:,}'.format(table, self.get_table_count(table)))
 
         # Get unique IDs to remove duplicates if provided
-        if table in self.list_db_tables() and unique_on is not None:
+        # if table in self.list_db_tables() and unique_on is not None:
+        if unique_on is not None:
+            # if len(unique_on) == 1 or isinstance(unique_on, str):
+            #     if len(unique_on) == 1:
+            #         unique_on = unique_on[0]
+            #     get_existing_sql = "SELECT {}"
             # Remove duplicate values from rows to insert based on unique_on
             # columns
+            logger.info('Removing any existing records from search results...')
             existing_ids = self.get_values(table=table, columns=unique_on,
                                            distinct=True)
-            logger.info('Removing any existing records from search results...')
             logger.info('Existing unique records in table "{}": '
                          '{:,}'.format(table, len(existing_ids)))
 
