@@ -190,7 +190,9 @@ def generate_sql(layer, columns=None, where=None, orderby=False,
             raise Exception
         jss = []
         for i, col in enumerate(remove_id_tbl_cols):
-            js = "{0}.{1} = {2}.{3}".format(remove_id_tbl, col, layer,
+            js = "{0}.{1} = {2}.{3}".format(remove_id_tbl,
+                                            col,
+                                            layer,
                                             remove_id_src_cols[i])
             jss.append(js)
 
@@ -397,8 +399,9 @@ class Postgres(object):
 
     def get_table_columns(self, table):
         """Get columns in passed table."""
-        self.cursor.execute(sql.SQL(
-            "SELECT * FROM {} LIMIT 0".format(sql.Identifier(table))))
+        self.cursor.execute(
+            sql.SQL(
+            "SELECT * FROM {} LIMIT 0").format(sql.Identifier(table)))
         columns = [d[0] for d in self.cursor.description]
 
         return columns
@@ -442,7 +445,7 @@ class Postgres(object):
 
     def insert_new_records(self, records, table, unique_on=None,
                            dryrun=False):
-        """
+        """ # TODO: ST_ASBINARY option -- autodetect geometry type
         Add records to table, converting data types as necessary for INSERT.
         Optionally using a unique_id (or combination of columns) to skip
         duplicates.
@@ -500,6 +503,7 @@ class Postgres(object):
         # Get unique IDs to remove duplicates if provided
         # if table in self.list_db_tables() and unique_on is not None:
         if unique_on is not None:
+            # TODO: _remove_dups_from_insert()
             starting_count = len(records)
             # Remove duplicates/existing records based on single column, this
             # is done on the database side by selecting any records from the
@@ -515,8 +519,9 @@ class Postgres(object):
                 logger.info('Duplicate records found: {:,}'.format(len(already_in_table)))
                 if len(already_in_table) != 0:
                     logger.info('Removing duplicates...')
+                    # Remove duplicates
                     records = records[~records[unique_on].isin(already_in_table[unique_on])]
-                # Remove duplicates
+
             else:
                 # Remove duplicate values from rows to insert based on multiple
                 # columns.
@@ -528,7 +533,6 @@ class Postgres(object):
                                                distinct=True)
                 logger.info('Existing unique records in table "{}": '
                              '{:,}'.format(table, len(existing_ids)))
-
                 # Remove dups
                 starting_count = len(records)
                 records = records[~records.apply(lambda x: _row_columns_unique(
@@ -545,10 +549,11 @@ class Postgres(object):
 
         geom_cols = get_geometry_cols(records)
         if geom_cols:
+            logger.debug('Geometry columns found: {}'.format(geom_cols))
             # Get epsg code
             srid = records.crs.to_epsg()
-        else:
-            geom_cols = []
+        # else:
+        #     geom_cols = []
 
         # Insert new records
         if dryrun:
@@ -582,6 +587,7 @@ class Postgres(object):
                                                if f not in geom_cols]),
                 )
                 if geom_cols:
+                    # TODO: def _create_geom_statement()
                     geom_statements = [sql.SQL(', ')]
                     for i, gc in enumerate(geom_cols):
                         if i != len(geom_cols) - 1:
@@ -607,6 +613,7 @@ class Postgres(object):
                           else row[f].wkt for f in row.index}
 
                 # Make the INSERT
+                # TODO: def _make_insert()
                 with self.cursor as cursor:
                     try:
                         cursor.execute(self.cursor.mogrify(insert_statement,
