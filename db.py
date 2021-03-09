@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from .logging_utils import create_logger
 # TODO: turn back to info
-logger = create_logger(__name__, 'sh', 'DEBUG')
+logger = create_logger(__name__, 'sh', 'INFO')
 
 # Supress pandas SettingWithCopyWarning
 pd.set_option('mode.chained_assignment', None)
@@ -565,21 +565,31 @@ class Postgres(object):
         def _create_geom_statement(geom_cols, srid, sde=False):
             geom_statements = [sql.SQL(', ')]
             for i, gc in enumerate(geom_cols):
-                # if i != len(geom_cols) - 1:
-                if sde:
-                    geom_statements.append(
-                        sql.SQL(" sde.st_geometry({gc}, {srid}),").format(
-                            gc=sql.Placeholder(gc),
-                            srid=sql.Literal(srid)))
+                if i != len(geom_cols) - 1:
+                    if sde:
+                        geom_statements.append(
+                            sql.SQL(" sde.st_geometry({gc}, {srid}),").format(
+                                gc=sql.Placeholder(gc),
+                                srid=sql.Literal(srid)))
+                    else:
+                        geom_statements.append(
+                            sql.SQL(" ST_GeomFromText({gc}, {srid}),").format(
+                                gc=sql.Placeholder(gc),
+                                srid=sql.Literal(srid)))
                 else:
-                    geom_statements.append(
-                        sql.SQL(" ST_GeomFromText({gc}, {srid}),").format(
-                            gc=sql.Placeholder(gc),
-                            srid=sql.Literal(srid)))
-                # else:
-                #     geom_statements.append(
-                #         sql.SQL(
-                #             " {geom_fxn}({gc}, {srid}))").format(
+                    if sde:
+                        geom_statements.append(
+                            sql.SQL(" sde.st_geometry({gc}, {srid})").format(
+                                gc=sql.Placeholder(gc),
+                                srid=sql.Literal(srid)))
+                    else:
+                        geom_statements.append(
+                            sql.SQL(" ST_GeomFromText({gc}, {srid})").format(
+                                gc=sql.Placeholder(gc),
+                                srid=sql.Literal(srid)))
+                    # geom_statements.append(
+                    #     sql.SQL(
+                    #         " {geom_fxn}({gc}, {srid}))").format(
                 #             geom_fxn=sql.Literal(geom_fxn),
                 #             gc=sql.Placeholder(gc),
                 #             srid=sql.Literal(srid)))
@@ -663,7 +673,7 @@ class Postgres(object):
                                                             sde=sde)
                     insert_statement = insert_statement + geom_statement
                 if sde_objectid:
-                    objectid_statement = sql.SQL(" sde.next_rowid({owner}, {table})").format(
+                    objectid_statement = sql.SQL(", sde.next_rowid({owner}, {table})").format(
                         owner=sql.Literal('sde'), # TODO: add as arg to function or get automatically
                         table=sql.Literal(table))
                     insert_statement = insert_statement + objectid_statement
