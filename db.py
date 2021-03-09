@@ -13,8 +13,8 @@ from sqlalchemy import create_engine
 from tqdm import tqdm
 
 from .logging_utils import create_logger
-
-logger = create_logger(__name__, 'sh', 'INFO')
+# TODO: turn back to info
+logger = create_logger(__name__, 'sh', 'DEBUG')
 
 # Supress pandas SettingWithCopyWarning
 pd.set_option('mode.chained_assignment', None)
@@ -362,13 +362,21 @@ class Postgres(object):
 
         return tables
 
-    def execute_sql(self, sql_query):
+    def execute_sql(self, sql_query, commit=True):
         """Execute the passed query on the database."""
         if not isinstance(sql_query, (sql.SQL, sql.Composable, sql.Composed)):
             sql_query = sql.SQL(sql_query)
         # logger.debug('SQL query: {}'.format(sql_query))
         self.cursor.execute(sql_query)
-        results = self.cursor.fetchall()
+        try:
+            results = self.cursor.fetchall()
+        except psycopg2.ProgrammingError as e:
+            if 'no results to fetch' in e.args:
+                results = None
+            else:
+                logger.error(e)
+        if commit:
+            self.connection.commit()
 
         return results
 
@@ -443,7 +451,36 @@ class Postgres(object):
 
         return df
 
-    def insert_new_records(self, records, table, unique_on=None,
+    def _make_insert(self, insert_statement, values):
+        with self.cursor as cursor:
+            try:
+                cursor.execute(self.cursor.mogrify(insert_statement,
+                                                   values))
+                self.connection.commit()
+            except Exception as e:
+                if e == psycopg2.errors.UniqueViolation:
+                    logger.warning('Skipping due to unique violation '
+                                   'for record: '
+                                   '{}'.format(row))
+                    logger.warning(e)
+                    self.connection.rollback()
+                elif e == psycopg2.errors.IntegrityError:
+                    logger.warning('Skipping due to integrity error '
+                                   'for record: '
+                                   '{}'.format(row))
+                    logger.warning(e)
+                    self.connection.rollback()
+                else:
+                    logger.debug('Error on statement: {}'.format(
+                        f"{str(self.cursor.mogrify(insert_statement, values))}"))
+                    logger.error(e)
+                    self.connection.rollback()
+                    raise e
+
+    def insert_new_records(self, records, table,
+                           unique_on=None,
+                           sde_objectid=None,
+                           sde=False,
                            dryrun=False):
         """ # TODO: ST_ASBINARY option -- autodetect geometry type
         Add records to table, converting data types as necessary for INSERT.
@@ -456,6 +493,49 @@ class Postgres(object):
         """
         # TODO: Create overwrite records option that removes any scenes in the
         #  input from the DB before writing them
+        def _remove_dups_from_insert(records, table, unique_on=None):
+            starting_count = len(records)
+            # Remove duplicates/existing records based on single column, this
+            # is done on the database side by selecting any records from the
+            # destination table that have an ID in common with the rows to be
+            # added.
+            if len(unique_on) == 1 or isinstance(unique_on, str):
+                if len(unique_on) == 1:
+                    unique_on = unique_on[0]
+                records_ids = list(records[unique_on])
+                get_existing_sql = f"SELECT {unique_on} FROM {table} " \
+                                   f"WHERE {unique_on} IN ({str(records_ids)[1:-1]})"
+                logger.debug(get_existing_sql)
+                already_in_table = self.sql2df(get_existing_sql)
+                logger.info('Duplicate records found: {:,}'.format(len(already_in_table)))
+                if len(already_in_table) != 0:
+                    logger.info('Removing duplicates...')
+                    # Remove duplicates
+                    records = records[~records[unique_on].isin(already_in_table[unique_on])]
+
+            else:
+                # Remove duplicate values from rows to insert based on multiple
+                # columns.
+                # TODO: Rewrite this to be done on the database side, maybe:
+                #  "WHERE column1 IN records[column1] AND
+                #  column2 IN records[column2] AND..
+                logger.info('Removing any existing records from search results...')
+                existing_ids = self.get_values(table=table,
+                                               columns=unique_on,
+                                               distinct=True)
+                logger.info('Existing unique records in table "{}": '
+                             '{:,}'.format(table, len(existing_ids)))
+                # Remove dups
+                starting_count = len(records)
+                records = records[~records.apply(lambda x: _row_columns_unique(
+                    x, unique_on, existing_ids), axis=1)]
+            if len(records) != starting_count:
+                logger.info('Duplicates removed: {:,}'.format(starting_count -
+                                                              len(records)))
+            else:
+                logger.info('No duplicates found.')
+
+            return records
 
         def _row_columns_unique(row, unique_on, values):
             """Determines if row has combination of columns in unique_on that
@@ -482,6 +562,31 @@ class Postgres(object):
 
             return row_values in values
 
+        def _create_geom_statement(geom_cols, srid, sde=False):
+            geom_statements = [sql.SQL(', ')]
+            for i, gc in enumerate(geom_cols):
+                # if i != len(geom_cols) - 1:
+                if sde:
+                    geom_statements.append(
+                        sql.SQL(" sde.st_geometry({gc}, {srid}),").format(
+                            gc=sql.Placeholder(gc),
+                            srid=sql.Literal(srid)))
+                else:
+                    geom_statements.append(
+                        sql.SQL(" ST_GeomFromText({gc}, {srid}),").format(
+                            gc=sql.Placeholder(gc),
+                            srid=sql.Literal(srid)))
+                # else:
+                #     geom_statements.append(
+                #         sql.SQL(
+                #             " {geom_fxn}({gc}, {srid}))").format(
+                #             geom_fxn=sql.Literal(geom_fxn),
+                #             gc=sql.Placeholder(gc),
+                #             srid=sql.Literal(srid)))
+            geom_statement = sql.Composed(geom_statements)
+
+            return geom_statement
+
         # Check that records is not empty
         if len(records) == 0:
             logger.warning('No records to be added.')
@@ -503,45 +608,10 @@ class Postgres(object):
         # Get unique IDs to remove duplicates if provided
         # if table in self.list_db_tables() and unique_on is not None:
         if unique_on is not None:
-            # TODO: _remove_dups_from_insert()
-            starting_count = len(records)
-            # Remove duplicates/existing records based on single column, this
-            # is done on the database side by selecting any records from the
-            # destination table that have an ID in common with the rows to be
-            # added.
-            if len(unique_on) == 1 or isinstance(unique_on, str):
-                if len(unique_on) == 1:
-                    unique_on = unique_on[0]
-                records_ids = list(records[unique_on])
-                get_existing_sql = f"SELECT {unique_on} FROM {table} WHERE {unique_on} IN ({str(records_ids)[1:-1]})"
-                logger.debug(get_existing_sql)
-                already_in_table = self.sql2df(get_existing_sql)
-                logger.info('Duplicate records found: {:,}'.format(len(already_in_table)))
-                if len(already_in_table) != 0:
-                    logger.info('Removing duplicates...')
-                    # Remove duplicates
-                    records = records[~records[unique_on].isin(already_in_table[unique_on])]
+            records = _remove_dups_from_insert(records=records,
+                                               table=table,
+                                               unique_on=unique_on)
 
-            else:
-                # Remove duplicate values from rows to insert based on multiple
-                # columns.
-                # TODO: Rewrite this to be done on the database side, maybe:
-                #  "WHERE column1 IN records[column1] AND
-                #  column2 IN records[column2] AND..
-                logger.info('Removing any existing records from search results...')
-                existing_ids = self.get_values(table=table, columns=unique_on,
-                                               distinct=True)
-                logger.info('Existing unique records in table "{}": '
-                             '{:,}'.format(table, len(existing_ids)))
-                # Remove dups
-                starting_count = len(records)
-                records = records[~records.apply(lambda x: _row_columns_unique(
-                    x, unique_on, existing_ids), axis=1)]
-            if len(records) != starting_count:
-                logger.info('Duplicates removed: {:,}'.format(starting_count -
-                                                              len(records)))
-            else:
-                logger.info('No duplicates found.')
         logger.info('Records to add: {:,}'.format(len(records)))
         if len(records) == 0:
             logger.info('No new records, skipping INSERT.')
@@ -551,9 +621,10 @@ class Postgres(object):
         if geom_cols:
             logger.debug('Geometry columns found: {}'.format(geom_cols))
             # Get epsg code
+            # TODO: check match with table
             srid = records.crs.to_epsg()
-        # else:
-        #     geom_cols = []
+        else:
+            geom_cols = []
 
         # Insert new records
         if dryrun:
@@ -561,19 +632,18 @@ class Postgres(object):
         if len(records) != 0:
             logger.info('Writing new records to {}.{}: '
                         '{:,}'.format(self.database, table, len(records)))
-
             for i, row in tqdm(records.iterrows(),
                                desc='Adding new records to: {}'.format(table),
                                total=len(records)):
-                if dryrun:
-                    continue
-
                 # Format the INSERT statement
-                columns = [sql.Identifier(c) for c in row.index if c not in
-                           geom_cols]
+                columns = [sql.Identifier(c) for c in row.index
+                           if c not in geom_cols and c != sde_objectid]
+                # TODO: why are the geometry columns added separately?
                 if geom_cols:
                     for gc in geom_cols:
                         columns.append(sql.Identifier(gc))
+                if sde_objectid:
+                    columns.append(sql.Identifier(sde_objectid))
                 # Create INSERT statement, parenthesis left open intentionally
                 # to accommodate adding geometry statements, e.g.:
                 # "ST_GeomFromText(..)"
@@ -584,59 +654,32 @@ class Postgres(object):
                     columns=sql.SQL(', ').join(columns),
                     values=sql.SQL(', ').join([sql.Placeholder(f)
                                                for f in row.index
-                                               if f not in geom_cols]),
+                                               if f not in geom_cols
+                                               and f != sde_objectid]), # TODO: generate list of 'standard cols' once
                 )
                 if geom_cols:
-                    # TODO: def _create_geom_statement()
-                    geom_statements = [sql.SQL(', ')]
-                    for i, gc in enumerate(geom_cols):
-                        if i != len(geom_cols) - 1:
-                            geom_statements.append(
-                                sql.SQL(
-                                    " ST_GeomFromText({gc}, {srid}),").format(
-                                    gc=sql.Placeholder(gc),
-                                    srid=sql.Literal(srid)))
-                        else:
-                            geom_statements.append(
-                                sql.SQL(
-                                    " ST_GeomFromText({gc}, {srid}))").format(
-                                    gc=sql.Placeholder(gc),
-                                    srid=sql.Literal(srid)))
-                    geom_statement = sql.Composed(geom_statements)
+                    geom_statement = _create_geom_statement(geom_cols=geom_cols,
+                                                            srid=srid,
+                                                            sde=sde)
                     insert_statement = insert_statement + geom_statement
-                else:
-                    # Close paranthesis that was left open for geometries
-                    insert_statement = sql.SQL("{statement})").format(
-                        statement=insert_statement)
+                if sde_objectid:
+                    objectid_statement = sql.SQL(" sde.next_rowid({owner}, {table})").format(
+                        owner=sql.Literal('sde'), # TODO: add as arg to function or get automatically
+                        table=sql.Literal(table))
+                    insert_statement = insert_statement + objectid_statement
+                # else:
+                # Close paranthesis that was left open for geometries + objectids
+                insert_statement = sql.SQL("{statement})").format(
+                    statement=insert_statement)
 
                 values = {f: row[f] if f not in geom_cols
                           else row[f].wkt for f in row.index}
 
+                if dryrun:
+                    continue
                 # Make the INSERT
-                # TODO: def _make_insert()
-                with self.cursor as cursor:
-                    try:
-                        cursor.execute(self.cursor.mogrify(insert_statement,
-                                                           values))
-                        self.connection.commit()
-                    except Exception as e:
-                        if e == psycopg2.errors.UniqueViolation:
-                            logger.warning('Skipping due to unique violation '
-                                           'for record: '
-                                           '{}'.format(row))
-                            logger.warning(e)
-                            self.connection.rollback()
-                        elif e == psycopg2.errors.IntegrityError:
-                            logger.warning('Skipping due to integrity error '
-                                           'for record: '
-                                           '{}'.format(row))
-                            logger.warning(e)
-                            self.connection.rollback()
-                        else:
-                            logger.debug('Error on statement: {}'.format(
-                                f"{str(self.cursor.mogrify(insert_statement, values))}"))
-                            logger.error(e)
-                            self.connection.rollback()
+                self._make_insert(insert_statement=insert_statement,
+                                  values=values)
         else:
             logger.info('No new records to be written.')
             
