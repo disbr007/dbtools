@@ -459,14 +459,14 @@ class Postgres(object):
                 self.connection.commit()
             except Exception as e:
                 if e == psycopg2.errors.UniqueViolation:
-                    logger.warning('Skipping due to unique violation '
-                                   'for record: '
+                    logger.warning('Skipping record due to unique violation '
+                                   'for: '
                                    '{}'.format(row))
                     logger.warning(e)
                     self.connection.rollback()
                 elif e == psycopg2.errors.IntegrityError:
-                    logger.warning('Skipping due to integrity error '
-                                   'for record: '
+                    logger.warning('Skipping record due to integrity error '
+                                   'for: '
                                    '{}'.format(row))
                     logger.warning(e)
                     self.connection.rollback()
@@ -482,17 +482,46 @@ class Postgres(object):
                            sde_objectid=None,
                            sde=False,
                            dryrun=False):
-        """ # TODO: ST_ASBINARY option -- autodetect geometry type
+        """
         Add records to table, converting data types as necessary for INSERT.
         Optionally using a unique_id (or combination of columns) to skip
         duplicates.
+        Parameters
+        ----------
         records : pd.DataFrame / gpd.GeoDataFrame
             DataFrame containing rows to be inserted to table
         table : str
             Name of table to be inserted into
-        """
+        unique_on: str, list
+            Name of column, or list of names of columns that are
+            present in both records and the destination table, to
+            use to remove duplicates prior to attempting the
+            INSERT
+        sde_objectid: str
+            Use to add an ID field using sde.next_rowid() with
+            the name provided here.
+        sde: bool
+            True to signal that the destination table is an SDE
+            database, and that sde functions (currently only
+            sde.st_geometry()) should be used, rather than PostGIS
+            functions (i.e. ST_GeomFromText())
+            TODO: convert this to be db_type (or similar) that
+                takes any database type from a list (sde,
+                postgis, etc) -> prefereable autodetect type of
+                database and choose fxns appropriately
+        dryrun: bool
+            True to create insert statements but not actually
+            perform the INSERT
+
+        Returns
+        --------
+        None:
+            TODO: Return records with added bool column if inserted or not
+                (or just bool series)
         # TODO: Create overwrite records option that removes any scenes in the
-        #  input from the DB before writing them
+            input from the DB before writing them
+        # TODO: autodetect unique constraint from column
+        """
         def _remove_dups_from_insert(records, table, unique_on=None):
             starting_count = len(records)
             # Remove duplicates/existing records based on single column, this
@@ -564,6 +593,7 @@ class Postgres(object):
 
         def _create_geom_statement(geom_cols, srid, sde=False):
             geom_statements = [sql.SQL(', ')]
+            # TODO: Clean this up, explicity add pre+post statement commas, etc.
             for i, gc in enumerate(geom_cols):
                 if i != len(geom_cols) - 1:
                     if sde:
@@ -587,12 +617,6 @@ class Postgres(object):
                             sql.SQL(" ST_GeomFromText({gc}, {srid})").format(
                                 gc=sql.Placeholder(gc),
                                 srid=sql.Literal(srid)))
-                    # geom_statements.append(
-                    #     sql.SQL(
-                    #         " {geom_fxn}({gc}, {srid}))").format(
-                #             geom_fxn=sql.Literal(geom_fxn),
-                #             gc=sql.Placeholder(gc),
-                #             srid=sql.Literal(srid)))
             geom_statement = sql.Composed(geom_statements)
 
             return geom_statement
@@ -602,7 +626,7 @@ class Postgres(object):
             logger.warning('No records to be added.')
             return
 
-        # Check if table exists, get table starting count, unique constraint
+        # Check if table exists
         logger.info('Inserting records into {}...'.format(table))
         if table not in self.list_db_tables():
             logger.warning('Table "{}" not found in database "{}" '
@@ -611,12 +635,10 @@ class Postgres(object):
                            'displayed in error. Support for checking for '
                            'presence of tables using fully qualified names '
                            'under development.'.format(table, self.database))
-
+        # Get table starting count
         logger.info('Starting count for {}: '
                     '{:,}'.format(table, self.get_table_count(table)))
-
         # Get unique IDs to remove duplicates if provided
-        # if table in self.list_db_tables() and unique_on is not None:
         if unique_on is not None:
             records = _remove_dups_from_insert(records=records,
                                                table=table,
@@ -686,6 +708,12 @@ class Postgres(object):
                           else row[f].wkt for f in row.index}
 
                 if dryrun:
+                    if i == 0:
+                        logger.debug('--dryrun--')
+                        logger.debug(
+                            f'Sample INSERT statement: '
+                            f'{insert_statement.as_string(self.connection)}')
+                        logger.debug(f'Sample values: {values}')
                     continue
                 # Make the INSERT
                 self._make_insert(insert_statement=insert_statement,
