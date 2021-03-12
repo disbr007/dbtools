@@ -451,13 +451,15 @@ class Postgres(object):
 
         return df
 
-    def _make_insert(self, insert_statement, values):
+    def _make_insert(self, insert_statement, values, row):
         with self.cursor as cursor:
             try:
                 cursor.execute(self.cursor.mogrify(insert_statement,
                                                    values))
                 self.connection.commit()
+                success = True
             except Exception as e:
+                success = False
                 if e == psycopg2.errors.UniqueViolation:
                     logger.warning('Skipping record due to unique violation '
                                    'for: '
@@ -476,6 +478,8 @@ class Postgres(object):
                     logger.error(e)
                     self.connection.rollback()
                     raise e
+
+        return success
 
     def insert_new_records(self, records, table,
                            unique_on=None,
@@ -620,6 +624,8 @@ class Postgres(object):
             geom_statement = sql.Composed(geom_statements)
 
             return geom_statement
+        # Get type of records (pd.DataFrame or gpd.GeoDataFrame
+        records_type = type(records)
 
         # Check that records is not empty
         if len(records) == 0:
@@ -638,6 +644,7 @@ class Postgres(object):
         # Get table starting count
         logger.info('Starting count for {}: '
                     '{:,}'.format(table, self.get_table_count(table)))
+
         # Get unique IDs to remove duplicates if provided
         if unique_on is not None:
             records = _remove_dups_from_insert(records=records,
@@ -647,7 +654,8 @@ class Postgres(object):
         logger.info('Records to add: {:,}'.format(len(records)))
         if len(records) == 0:
             logger.info('No new records, skipping INSERT.')
-            return
+            # TODO: make this return at the end
+            return records_type().reindex_like(records), records_type().reindex_like(records)
 
         geom_cols = get_geometry_cols(records)
         if geom_cols:
@@ -664,6 +672,8 @@ class Postgres(object):
         if len(records) != 0:
             logger.info('Writing new records to {}.{}: '
                         '{:,}'.format(self.database, table, len(records)))
+            successful_rows = []
+            failed_rows = []
             for i, row in tqdm(records.iterrows(),
                                desc='Adding new records to: {}'.format(table),
                                total=len(records)):
@@ -716,14 +726,26 @@ class Postgres(object):
                         logger.debug(f'Sample values: {values}')
                     continue
                 # Make the INSERT
-                self._make_insert(insert_statement=insert_statement,
-                                  values=values)
+                success = self._make_insert(insert_statement=insert_statement,
+                                            values=values,
+                                            row=row)
+                if success:
+                    successful_rows.append(row)
+                else:
+                    failed_rows.append(row)
+
+            successful_df = records_type(successful_rows)
+            failed_df = records_type(failed_rows)
         else:
             logger.info('No new records to be written.')
-            
+            successful_df = records_type().reindex_like(records)
+            failed_df = records_type().reindex_like(records)
+
         logger.info('New count for {}.{}: '
                     '{:,}'.format(self.database, table,
                                   self.get_table_count(table)))
+
+        return successful_df, failed_df
 
 # TODO: Create SQLQuery class
 #   - .select .where .fields .join etc.
