@@ -10,8 +10,6 @@ from datetime import datetime
 
 import logging
 import os
-import platform
-import sys
 
 
 def LOGGING_CONFIG(level):
@@ -19,8 +17,8 @@ def LOGGING_CONFIG(level):
     CONFIG = {
         'version': 1,
         'disable_existing_loggers': True,
-        'formatters': { 
-            'standard': { 
+        'formatters': {
+            'standard': {
                 'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
             },
         },
