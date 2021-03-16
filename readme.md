@@ -62,3 +62,8 @@ with Postgres([host_name], [database_name]) as db_src:
                             encode_geom_col_as='geometry')
     gdf = db_src.sql2gdf(sql_str)
 ```
+
+<!--- TODO
+-use .ini connection files, e.g. https://www.postgresql.org/docs/9.1/libpq-pgservice.html
+-create setup.py to allow for installation elsewhere
+---> 
