@@ -36,6 +36,11 @@ PASSWORD = 'password'
 DATABASE = 'database'
 
 
+# Constants
+DEF_SKIP_SCHEMAS = ['information_schema',
+                    'pg_catalog']
+
+
 def get_db_config(host_name, db_name, config_file=CONFIG_FILE):
     # TODO: validate config entries
     if not isinstance(config_file, PurePath):
@@ -323,37 +328,51 @@ class Postgres(object):
 
         return engine
 
-    def list_db_tables(self):
+    def list_tables(self, skip_schemas=DEF_SKIP_SCHEMAS):
         """List all tables in the database."""
-        # TODO: Add support for fully qualified table/view/mat_view names
-        #  i.e. db.schema.table
         logger.debug('Listing tables...')
         tables_sql = sql.SQL("""SELECT schemaname, tablename
                                 FROM pg_catalog.pg_tables""")
         self.cursor.execute(tables_sql)
-        tables = self.cursor.fetchall()
-        logger.debug('Tables: {}'.format(tables))
+        schemas_tables = self.cursor.fetchall()
+        qualified_tables = ['{}.{}'.format(s, t) for s, t in schemas_tables
+                           if s not in skip_schemas]
+        logger.debug('Tables: {}'.format(qualified_tables))
 
+        return qualified_tables
+
+    def list_views(self, skip_schemas=DEF_SKIP_SCHEMAS):
         logger.debug('Listing views...')
         views_sql = sql.SQL("""SELECT schemaname, viewname
                                FROM pg_catalog.pg_views""")
         self.cursor.execute(views_sql)
-        views = self.cursor.fetchall()
-        tables.extend(views)
-        logger.debug('Views: {}'.format(views))
+        schemas_views = self.cursor.fetchall()
+        qualified_views = ['{}.{}'.format(s, t) for s, t in schemas_views
+                           if s not in skip_schemas]
+        logger.debug('Views: {}'.format(qualified_views))
 
-        logger.debug('Listing materialized views...')
+        return qualified_views
+
+    def list_matviews(self, skip_schemas=DEF_SKIP_SCHEMAS):
+        logger.debug('Listing Materialized Views...')
         matviews_sql = sql.SQL("""SELECT schemaname, matviewname
                                   FROM pg_catalog.pg_matviews""")
         self.cursor.execute(matviews_sql)
-        matviews = self.cursor.fetchall()
-        tables.extend(matviews)
-        logger.debug("Materialized views: {}".format(matviews))
+        schemas_matviews = self.cursor.fetchall()
+        qualified_matviews = ['{}.{}'.format(s, t) for s, t in schemas_matviews
+                              if s not in skip_schemas]
+        logger.debug('Materialized Views: {}'.format(qualified_matviews))
 
-        # tables = [x[1] for x in tables]
-        # tables = sorted(tables)
+        return qualified_matviews
 
-        return tables
+    def list_db_all(self):
+        tables = self.list_tables()
+        views = self.list_views()
+        matviews = self.list_matviews()
+
+        all_layers = tables + views + matviews
+
+        return all_layers
 
     def execute_sql(self, sql_query, commit=True):
         """Execute the passed query on the database."""
