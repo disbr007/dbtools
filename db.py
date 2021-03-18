@@ -328,37 +328,30 @@ class Postgres(object):
         # TODO: Add support for fully qualified table/view/mat_view names
         #  i.e. db.schema.table
         logger.debug('Listing tables...')
-        tables_sql = sql.SQL("""SELECT table_schema as schema_name,
-                                       table_name as view_name
-                                FROM information_schema.tables
-                                WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
-                                ORDER BY schema_name, view_name""")
+        tables_sql = sql.SQL("""SELECT schemaname, tablename
+                                FROM pg_catalog.pg_tables""")
         self.cursor.execute(tables_sql)
         tables = self.cursor.fetchall()
         logger.debug('Tables: {}'.format(tables))
 
-        views_sql = sql.SQL("""SELECT table_schema as schema_name,
-                                      table_name as view_name
-                               FROM information_schema.views
-                               WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
-                               ORDER BY schema_name, view_name""")
+        logger.debug('Listing views...')
+        views_sql = sql.SQL("""SELECT schemaname, viewname
+                               FROM pg_catalog.pg_views""")
         self.cursor.execute(views_sql)
-
-        # tables = self.cursor.fetchall()
         views = self.cursor.fetchall()
         tables.extend(views)
         logger.debug('Views: {}'.format(views))
 
-        matviews_sql = sql.SQL("""SELECT schemaname as schema_name, 
-                                      matviewname as view_name
-                                  FROM pg_matviews""")
+        logger.debug('Listing materialized views...')
+        matviews_sql = sql.SQL("""SELECT schemaname, matviewname
+                                  FROM pg_catalog.pg_matviews""")
         self.cursor.execute(matviews_sql)
         matviews = self.cursor.fetchall()
         tables.extend(matviews)
         logger.debug("Materialized views: {}".format(matviews))
 
-        tables = [x[1] for x in tables]
-        tables = sorted(tables)
+        # tables = [x[1] for x in tables]
+        # tables = sorted(tables)
 
         return tables
 
