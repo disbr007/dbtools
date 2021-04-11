@@ -520,7 +520,7 @@ class Postgres(object):
 
         return df
 
-    def gdf2postgis(self, gdf: gpd.GeoDataFrame, table, schema=None,
+    def gdf2postgis(self, gdf: gpd.GeoDataFrame, table, schema=None, con=None,
                     unique_on=None, if_exists='append', index=True,
                     chunksize=None,
                     pool_size=None, max_overflow=None,
@@ -552,10 +552,12 @@ class Postgres(object):
         # Write
         if not dryrun:
             logger.info(f'Inserting {len(gdf):,} records into {table}...')
-            if pool_size:
-                con = self.get_engine_pools(pool_size=pool_size, max_overflow=max_overflow)
-            else:
-                con = self.get_engine()
+            if not con:
+                if pool_size:
+                    con = self.get_engine_pools(pool_size=pool_size, max_overflow=max_overflow)
+                else:
+                    con = self.get_engine()
+
             gdf.to_postgis(name=table, con=con, schema=schema,
                            if_exists=if_exists, index=index, chunksize=chunksize)
             # logger.info(f'Ending count for {schema}.{table}: '
