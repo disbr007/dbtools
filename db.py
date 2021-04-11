@@ -2,6 +2,7 @@ import json
 import re
 from pathlib import Path, PurePath
 import sys
+from typing import Union, Tuple, List, AnyStr
 
 import geopandas as gpd
 import pandas as pd
@@ -34,7 +35,6 @@ HOST = 'host'
 USER = 'user'
 PASSWORD = 'password'
 DATABASE = 'database'
-
 
 # Constants
 DEF_SKIP_SCHEMAS = ['information_schema',
@@ -77,7 +77,8 @@ def get_db_config(host_name, db_name, config_file=CONFIG_FILE):
     else:
         logger.error('Database "{}" not listed in {} config.'.format(db_name,
                                                                      host_name))
-        raise
+        raise ConnectionError
+
     # Add username and password
     if USER not in db_config.keys():
         db_config[USER] = config[GLOBAL_USER]
@@ -144,7 +145,7 @@ def make_identifier(sql_str):
         return sql.Identifier(sql_str)
 
 
-def generate_sql(layer, columns=None, where=None, orderby=False,
+def generate_sql(layer, columns=None, where=None, orderby=False, schema=None,
                  orderby_asc=False, distinct=False, limit=False, offset=None,
                  geom_col=None, encode_geom_col_as='geometry', remove_id_tbl=None,
                  remove_id_tbl_cols=None, remove_id_src_cols=None):
@@ -175,9 +176,10 @@ def generate_sql(layer, columns=None, where=None, orderby=False,
             table=sql.Identifier(layer))
     else:
         # Create base query object
-        query = sql.SQL("{select} {fields} FROM {table}").format(
+        query = sql.SQL("{select} {fields} FROM {schema}.{table}").format(
             select=sql.SQL(sql_select),
             fields=fields,
+            schema=sql.Identifier(schema),
             table=sql.Identifier(layer))
 
     # Add any provided additional parameters
@@ -328,15 +330,47 @@ class Postgres(object):
 
         return engine
 
-    def list_tables(self, skip_schemas=DEF_SKIP_SCHEMAS):
+    def get_engine_pools(self, pool_size=5, max_overflow=10):
+        """Create sqlalchemy.engine object."""
+        engine = create_engine('postgresql+psycopg2://'
+                               '{user}:{password}@{host}/{database}'.format(**self.db_config),
+                               pool_size=pool_size,
+                               max_overflow=max_overflow)
+
+        return engine
+
+    def list_schemas(self, include_infoschemas=False):
+        """List all schemas in the database"""
+        logger.debug('Listing schemas...')
+        schemas_sql = sql.SQL("""SELECT schemaname from pg_catalog.pg_tables""")
+        self.cursor.execute(schemas_sql)
+        schemas = self.cursor.fetchall()
+        if include_infoschemas:
+            # TODO: permissions issue on information_schema
+            infoschemas_sql = sql.SQL("SELECT schema_name FROM information_schema.schemata")
+            self.cursor.execute(infoschemas_sql)
+            infoschemas = self.cursor.fetchall()
+            schemas.extend(infoschemas)
+        # Remove duplicates
+        schemas = set([s[0] for s in schemas])
+        logger.debug('Schemas: {}'.format(schemas))
+        return schemas
+
+    def list_tables(self, schemas=None, skip_schemas=DEF_SKIP_SCHEMAS):
         """List all tables in the database."""
         logger.debug('Listing tables...')
-        tables_sql = sql.SQL("""SELECT schemaname, tablename
-                                FROM pg_catalog.pg_tables""")
+        tables_sql = sql.SQL("SELECT schemaname, tablename "
+                             "FROM pg_catalog.pg_tables")
+        if schemas:
+            if not isinstance(schemas, list):
+                schemas = [schemas]
+            schemas_str = str(schemas)[1:-1]
+            tables_sql = tables_sql + sql.SQL(f" WHERE schemaname IN ({schemas_str})")
         self.cursor.execute(tables_sql)
         schemas_tables = self.cursor.fetchall()
+
         qualified_tables = ['{}.{}'.format(s, t) for s, t in schemas_tables
-                           if s not in skip_schemas]
+                            if s not in skip_schemas]
         logger.debug('Tables: {}'.format(qualified_tables))
 
         return qualified_tables
@@ -384,11 +418,30 @@ class Postgres(object):
             results = self.cursor.fetchall()
         except psycopg2.ProgrammingError as e:
             if 'no results to fetch' in e.args:
+                # TODO: Do this without an exception catch
                 results = None
             else:
                 logger.error(e)
         if commit:
             self.connection.commit()
+
+        return results
+
+    def create_schema(self, schema_name, if_not_exists=True, dryrun=False):
+
+        if if_not_exists:
+            create_schema_sql = (sql.SQL(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
+                                 .format(schema_name=schema_name))
+        else:
+            create_schema_sql = (sql.SQL(f"CREATE SCHEMA {schema_name}")
+                                 .format(schema_name=schema_name))
+        logger.debug('Creating schema:\n{}'
+                     .format(create_schema_sql.as_string(self.connection)))
+        if not dryrun:
+            results = self.execute_sql(create_schema_sql)
+        else:
+            logger.debug('--dryrun--')
+            results = None
 
         return results
 
@@ -406,14 +459,18 @@ class Postgres(object):
 
         return count
 
-    def get_table_count(self, table):
+    def get_table_count(self, table, schema=None):
         """Get total count for the passed table."""
         # if not isinstance(table, sql.Identifier):
         #     table = sql.Identifier(table)
+        if schema:
+            qualified_table = f'{schema}.{table}'
+        else:
+            qualified_table = table
         self.cursor.execute(sql.SQL(
-            "SELECT COUNT(*) FROM {}".format(table)))
+            "SELECT COUNT(*) FROM {}".format(qualified_table)))
         count = self.cursor.fetchall()[0][0]
-        logger.debug('{} count: {:,}'.format(table, count))
+        logger.debug('{} count: {:,}'.format(qualified_table, count))
 
         return count
 
@@ -426,13 +483,13 @@ class Postgres(object):
 
         return columns
 
-    def get_values(self, table, columns, distinct=False, where=None):
+    def get_values(self, table, columns, schema=None, distinct=False, where=None):
         """Get values in the passed columns(s) in the passed table. If
         distinct, unique values returned (across all columns passed)"""
         if isinstance(columns, str):
             columns = [columns]
 
-        sql_statement = generate_sql(layer=table, columns=columns,
+        sql_statement = generate_sql(layer=table, schema=schema, columns=columns,
                                      distinct=distinct, where=where)
         values = self.execute_sql(sql_statement)
 
@@ -462,6 +519,49 @@ class Postgres(object):
                          columns=columns, **kwargs)
 
         return df
+
+    def gdf2postgis(self, gdf: gpd.GeoDataFrame, table, schema=None,
+                    unique_on=None, if_exists='append', index=True,
+                    chunksize=None,
+                    pool_size=None, max_overflow=None,
+                    dryrun=False):
+        """
+        TODO: write docstrings
+        """
+        # Verify args
+        # if_exists_opts = {'fail', 'replace', 'append'}
+        # if if_exists not in if_exists_opts:
+        #     logger.error(f'Invalid options for "if_exists": "{if_exists}".\n'
+        #                  f'Must be one of: {if_exists_opts}')
+        # # Check if table exists
+        # table_exists = f'{schema}.{table}' in self.list_db_all()
+        # if table_exists:
+        #     logger.debug(f'Table "{table}" exists. INSERT method provided: {if_exists}')
+        #     # Get starting count
+        #     logger.info(f'Starting count for {schema}.{table}: '
+        #                 f'{self.get_table_count(table, schema=schema):,}')
+        # else:
+        #     logger.info(f'Table "{table}" does not exist. Will be created.')
+
+        # if unique_on is not None and table_exists:
+        #     logger.debug('Removing duplicates based on: {}...'.format(unique_on))
+        #     existing_values = self.get_values(table=table, schema=schema,
+        #                                       columns=unique_on)
+        #     gdf = gdf[~gdf[unique_on].isin(existing_values)]
+
+        # Write
+        if not dryrun:
+            logger.info(f'Inserting {len(gdf):,} records into {table}...')
+            if pool_size:
+                con = self.get_engine_pools(pool_size=pool_size, max_overflow=max_overflow)
+            else:
+                con = self.get_engine()
+            gdf.to_postgis(name=table, con=con, schema=schema,
+                           if_exists=if_exists, index=index, chunksize=chunksize)
+            # logger.info(f'Ending count for {schema}.{table}: '
+            #             f'{self.get_table_count(table, schema=schema):,}')
+        else:
+            logger.info('--dryrun--\n')
 
     def _make_insert(self, insert_statement, values, row):
         with self.cursor as cursor:
@@ -493,7 +593,7 @@ class Postgres(object):
 
         return success
 
-    def insert_new_records(self, records, table,
+    def insert_new_records(self, records, table, schema=None,
                            unique_on=None,
                            sde_objectid=None,
                            sde=False,
@@ -645,17 +745,20 @@ class Postgres(object):
             return
 
         # Check if table exists
-        logger.info('Inserting records into {}...'.format(table))
-        if table not in self.list_db_tables():
+        if table not in self.list_db_all():
             logger.warning('Table "{}" not found in database "{}" '
                            'If a fully qualified table name was provided '
                            '(i.e. db.schema.table_name) this message may be '
                            'displayed in error. Support for checking for '
                            'presence of tables using fully qualified names '
                            'under development.'.format(table, self.database))
-        # Get table starting count
-        logger.info('Starting count for {}: '
-                    '{:,}'.format(table, self.get_table_count(table)))
+            logger.info(f'Table "{table}" not found in database "{self.database}", '
+                        f'it will be created.')
+        else:
+            logger.info('Inserting records into {}...'.format(table))
+            # Get table starting count
+            logger.info('Starting count for {}: '
+                        '{:,}'.format(table, self.get_table_count(table)))
 
         # Get unique IDs to remove duplicates if provided
         if unique_on is not None:
@@ -703,7 +806,8 @@ class Postgres(object):
                 # "ST_GeomFromText(..)"
                 # paranthesis, closed in else block if no geometry columns
                 insert_statement = sql.SQL(
-                    "INSERT INTO {table} ({columns}) VALUES ({values}").format(
+                    "INSERT INTO {schema}.{table} ({columns}) VALUES ({values}").format(
+                    schema=sql.Identifier(schema),
                     table=sql.Identifier(table),
                     columns=sql.SQL(', ').join(columns),
                     values=sql.SQL(', ').join([sql.Placeholder(f)
@@ -753,11 +857,15 @@ class Postgres(object):
             successful_df = records_type().reindex_like(records)
             failed_df = records_type().reindex_like(records)
 
-        logger.info('New count for {}.{}: '
-                    '{:,}'.format(self.database, table,
-                                  self.get_table_count(table)))
+        if not dryrun:
+            logger.info('New count for {}.{}: '
+                        '{:,}'.format(self.database, table,
+                                      self.get_table_count(table)))
+        else:
+            logger.info('--dryrun--')
 
         return successful_df, failed_df
 
 # TODO: Create SQLQuery class
 #   - .select .where .fields .join etc.
+#  convert string variables in SQL querys (pgcatalog, etc. to constants)
