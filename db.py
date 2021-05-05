@@ -1,3 +1,5 @@
+import datetime
+import decimal
 import json
 import re
 from pathlib import Path, PurePath
@@ -11,10 +13,11 @@ from psycopg2 import sql
 import shapely
 from shapely.geometry import Point
 from sqlalchemy import create_engine
+import sqlalchemy
 from tqdm import tqdm
 
 from .logging_utils import create_logger
-# TODO: turn back to info
+
 logger = create_logger(__name__, 'sh', 'INFO')
 
 # Supress pandas SettingWithCopyWarning
@@ -39,6 +42,7 @@ DATABASE = 'database'
 # Constants
 DEF_SKIP_SCHEMAS = ['information_schema',
                     'pg_catalog']
+FAIL = 'fail'
 
 
 def get_db_config(host_name, db_name, config_file=CONFIG_FILE):
@@ -263,6 +267,13 @@ def intersect_aoi_where(aoi, geom_col):
     return aoi_where
 
 
+def drop_z_dim(gdf: gpd.GeoDataFrame):
+    """Drop Z values from geodataframe geometries"""
+    gdf.geometry = gdf.geometry.apply(
+        lambda x: shapely.wkb.loads(shapely.wkb.dumps(x, output_dimension=2)))
+    return gdf
+
+
 class Postgres(object):
     """
     Class for interacting with Postgres database using psycopg2. This
@@ -279,6 +290,20 @@ class Postgres(object):
         self.database = database
         self._connection = None
         self._cursor = None
+        self._py2sql_types = {
+            int: sqlalchemy.sql.sqltypes.BigInteger,
+            str: sqlalchemy.sql.sqltypes.Unicode,
+            float: sqlalchemy.sql.sqltypes.Float,
+            decimal.Decimal: sqlalchemy.sql.sqltypes.Numeric,
+            datetime.datetime: sqlalchemy.sql.sqltypes.DateTime,
+            bytes: sqlalchemy.sql.sqltypes.LargeBinary,
+            bool: sqlalchemy.sql.sqltypes.Boolean,
+            datetime.date: sqlalchemy.sql.sqltypes.Date,
+            datetime.time: sqlalchemy.sql.sqltypes.Time,
+            datetime.timedelta: sqlalchemy.sql.sqltypes.Interval,
+            list: sqlalchemy.sql.sqltypes.ARRAY,
+            dict: sqlalchemy.sql.sqltypes.JSON
+        }
 
     @property
     def connection(self):
@@ -414,36 +439,141 @@ class Postgres(object):
             sql_query = sql.SQL(sql_query)
         # logger.debug('SQL query: {}'.format(sql_query))
         self.cursor.execute(sql_query)
-        try:
-            results = self.cursor.fetchall()
-        except psycopg2.ProgrammingError as e:
-            if 'no results to fetch' in e.args:
-                # TODO: Do this without an exception catch
-                results = None
-            else:
-                logger.error(e)
+        # try:
+        #     results = self.cursor.fetchall()
+        # except psycopg2.ProgrammingError as e:
+        #     if 'no results to fetch' in e.args:
+        #         TODO: Do this without an exception catch
+                # results = None
+            # else:
+            #     logger.error(e)
         if commit:
             self.connection.commit()
 
-        return results
+        # return results
 
-    def create_schema(self, schema_name, if_not_exists=True, dryrun=False):
+    def schema_exists(self, schema):
+        """True if schema exists"""
+        db_schemas = self.list_schemas()
+        return schema in db_schemas
 
+    def table_exists(self, table: str, schema: str, qualified: bool = True):
+        """
+        True if table exists in schema
+        Args:
+            table: str
+                Name of table to check existence of
+            schema: str
+                Name of schema to check in
+            qualified: bool
+                Whether the [table] passed is qualified
+
+        Returns: bool
+            True if table exists in schema
+        """
+        if not qualified:
+            table = f'{schema}.{table}'
+        schema_tables = self.list_tables(schemas=schema)
+        return table in schema_tables
+
+    def create_schema(self, schema_name, if_not_exists=True, dryrun=False)\
+            -> bool:
+        """Creates a new schema of [schema_name]"""
         if if_not_exists:
             create_schema_sql = (sql.SQL(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
                                  .format(schema_name=schema_name))
         else:
             create_schema_sql = (sql.SQL(f"CREATE SCHEMA {schema_name}")
                                  .format(schema_name=schema_name))
+        logger.info(f'Creating schema: {schema_name}')
         logger.debug('Creating schema:\n{}'
                      .format(create_schema_sql.as_string(self.connection)))
         if not dryrun:
-            results = self.execute_sql(create_schema_sql)
+            self.execute_sql(create_schema_sql)
         else:
-            logger.debug('--dryrun--')
-            results = None
+            logger.info('--dryrun--')
 
-        return results
+        schema_exists = self.schema_exists(schema_name)
+
+        return schema_exists
+
+    # TODO: To make this work, need to add column: type mappings
+    # def create_table(self, table_name, schema_name=None, qualified=False,
+    #                  if_not_exists=True,
+    #                  dryrun=False):
+    #     if qualified:
+    #         schema_name, table_name = table_name.split('.')
+    #     # Create schema if it doesn't exist
+    #     if schema_name not in self.list_schemas():
+    #         self.create_schema(schema_name=schema_name,
+    #                            if_not_exists=if_not_exists)
+    #     # Format CREATE TABLE SQL
+    #     create_table_sql = sql.SQL("CREATE TABLE ")
+    #     if if_not_exists:
+    #         create_table_sql += sql.SQL("IF NOT EXISTS ")
+    #     if schema_name:
+    #         create_table_sql += (sql.SQL(f"{schema_name}.")
+    #                              .format(schema_name=schema_name))
+    #     create_table_sql += sql.SQL(f"{table_name}").format(table_name)
+    #
+    #     logger.info('Creating table:\n{}'
+    #                 .format(create_table_sql.as_string(self.connection)))
+    #     # Execute SQL
+    #     if not dryrun:
+    #         results = self.execute_sql(create_table_sql)
+    #     else:
+    #         logger.info('--dryrun--')
+    #         results = None
+    #     return results
+
+    def create_table_like_df(self, table_name: str,
+                             df: Union[pd.DataFrame, gpd.GeoDataFrame],
+                             schema_name: str = None,
+                             qualified: bool = False,
+                             index: bool = True,
+                             dtype: dict = None,
+                             dryrun: bool = False):
+        """
+        Creates a new, empty table, using pandas/geopandas to infer
+        column types.
+        table_name: str
+            Name of table to be created.
+        df: Union[pd.DataFrame, gpd.GeoDataFrame]
+            DataFrame to create table like
+        schema_name: str
+            Schema to create table in
+        qualified: bool
+            True if table is qualified (schema.table)
+        index: bool
+            True to write DataFrame index as column
+        dryrun: bool
+            Run without performing actions
+        """
+        # TODO: do some type interpolation, mainly for
+        #  dict->sqlalchemy.sql.sqltypes.JSON
+        df = df[0:0]
+        if qualified:
+            schema_name, table_name = table_name.split('.')
+        logger.info(f'Creating table: {table_name}')
+        if schema_name:
+            logger.info(f'In schema: {schema_name}')
+
+        if not isinstance(df, (pd.DataFrame, gpd.GeoDataFrame)):
+            logger.error(f'Unrecognized df type: {df}')
+
+        if not dryrun:
+            # Check for GeoDataFrame must be first because GDFs are DFs as well
+            if isinstance(df, gpd.GeoDataFrame):
+                df.to_postgis(name=table_name, schema=schema_name,
+                              con=self.get_engine(), index=index)
+            elif isinstance(df, pd.DataFrame):
+                df.to_sql(name=table_name, schema=schema_name,
+                          con=self.get_engine(),
+                          if_exists=FAIL,
+                          index=index,
+                          dtype=dtype)
+        table_exists = self.table_exists(table_name, schema=schema_name)
+        return table_exists
 
     def get_sql_count(self, sql_str):
         """Get count of records returned by passed query. Query should
@@ -520,8 +650,79 @@ class Postgres(object):
 
         return df
 
+    def prep_db_for_upload(self, df: Union[pd.DataFrame, gpd.GeoDataFrame],
+                           table: str, schema: str = None, index: bool = False,
+                           dtype: dict = None,
+                           dryrun: bool = False):
+        """
+        Checks if schema and table exist in database, creates them if not.
+
+        Args:
+            df: Union[pd.DataFrame, gpd.GeoDataFrame]
+                DataFrame to be added
+            table: str
+                Name of destination table (unqualified)
+            schema: str
+                Name of destination schema
+            dtype: dict
+                Column type mappings to sql types
+            dryrun: bool
+                Run without performing actions
+
+        Returns: tuple
+            indicating whether the schema and/or table exist, e.g.
+            (True, False) for schema exists after prep, table does not
+        """
+        # Get tables and scehmas to check if the destination already exists
+        # Check if schema exists, create if not
+        schema_exists = self.schema_exists(schema)
+        if not schema_exists:
+            logger.info(f'Schema "{schema}" not found, will be created.')
+            se = self.create_schema(schema_name=schema, if_not_exists=True,
+                                    dryrun=dryrun)
+        else:
+            logger.info(f'Existing schema "{schema}" located.')
+        # Check if table exists in schema, create if not
+        qualified_table = f'{schema}.{table}'
+        table_exists = self.table_exists(table=qualified_table, schema=schema)
+        if not table_exists:
+            logger.info(f'Table {qualified_table} not found, will be created.')
+            te = self.create_table_like_df(table_name=qualified_table,
+                                           df=df,
+                                           qualified=True,
+                                           index=index,
+                                           dtype=dtype,
+                                           dryrun=dryrun)
+        # Report count of table (if it exists (not a dryrun))
+        if te:
+            starting_table_count = self.get_table_count(table=table,
+                                                        schema=schema)
+            logger.info(f'{schema}.{table} starting count: '
+                        f'{starting_table_count}')
+        return se, te
+
+    def df2postgres(self, df: pd.DataFrame, table: str, schema: str = None,
+                    if_exists: str = 'fail', index: bool = False,
+                    con: Union[sqlalchemy.engine.Engine,
+                               sqlalchemy.engine.Connection] = None, dtype: dict = None,
+                    dryrun: bool = False,):
+        logger.info(f'Inserting {len(df):,} records into {table}...')
+        if schema:
+            logger.info(f'In schema: {schema}')
+        if not con:
+            con = self.get_engine()
+        te, se = self.prep_db_for_upload(df=df, table=table, schema=schema,
+                                         dtype=dtype,
+                                         dryrun=dryrun)
+        if not dryrun:
+            df.to_sql(name=table, schema=schema, con=con, if_exists=if_exists,
+                      index=index, dtype=dtype)
+        else:
+            logger.info('--dryrun--')
+
     def gdf2postgis(self, gdf: gpd.GeoDataFrame, table, schema=None, con=None,
                     unique_on=None, if_exists='append', index=True,
+                    drop_z: bool = False,
                     chunksize=None,
                     pool_size=None, max_overflow=None,
                     dryrun=False):
@@ -529,27 +730,35 @@ class Postgres(object):
         TODO: write docstrings
         """
         # Verify args
-        # if_exists_opts = {'fail', 'replace', 'append'}
-        # if if_exists not in if_exists_opts:
-        #     logger.error(f'Invalid options for "if_exists": "{if_exists}".\n'
-        #                  f'Must be one of: {if_exists_opts}')
-        # # Check if table exists
-        # table_exists = f'{schema}.{table}' in self.list_db_all()
-        # if table_exists:
-        #     logger.debug(f'Table "{table}" exists. INSERT method provided: {if_exists}')
-        #     # Get starting count
-        #     logger.info(f'Starting count for {schema}.{table}: '
-        #                 f'{self.get_table_count(table, schema=schema):,}')
-        # else:
-        #     logger.info(f'Table "{table}" does not exist. Will be created.')
+        if_exists_opts = {'fail', 'replace', 'append'}
+        if if_exists not in if_exists_opts:
+            logger.error(f'Invalid options for "if_exists": "{if_exists}".\n'
+                         f'Must be one of: {if_exists_opts}')
+        se, te = self.prep_db_for_upload(df=gdf, table=table, schema=schema,
+                                         dryrun=dryrun)
 
-        # if unique_on is not None and table_exists:
-        #     logger.debug('Removing duplicates based on: {}...'.format(unique_on))
-        #     existing_values = self.get_values(table=table, schema=schema,
-        #                                       columns=unique_on)
-        #     gdf = gdf[~gdf[unique_on].isin(existing_values)]
+        # Get starting count if table exists
+        if te:
+            logger.debug(f'Table "{table}" exists. INSERT method provided: {if_exists}')
+            # Get starting count
+            logger.info(f'Starting count for {schema}.{table}: '
+                        f'{self.get_table_count(table, schema=schema):,}')
 
-        # Write
+        # Remove existing values
+        if unique_on is not None and te:
+            logger.debug('Removing duplicates based on: {}...'.format(unique_on))
+            existing_values = self.get_values(table=table, schema=schema,
+                                              columns=unique_on)
+            gdf = gdf[~gdf[unique_on].isin(existing_values)]
+
+        if drop_z:
+            if any(gdf.has_z):
+                logger.info('Dropping Z dimension.')
+                gdf = drop_z_dim(gdf)
+            else:
+                logger.info('No Z dimension found.')
+
+        # INSERT
         if not dryrun:
             logger.info(f'Inserting {len(gdf):,} records into {table}...')
             if not con:
@@ -560,8 +769,9 @@ class Postgres(object):
 
             gdf.to_postgis(name=table, con=con, schema=schema,
                            if_exists=if_exists, index=index, chunksize=chunksize)
-            # logger.info(f'Ending count for {schema}.{table}: '
-            #             f'{self.get_table_count(table, schema=schema):,}')
+            if te:
+                logger.info(f'Ending count for {schema}.{table}: '
+                            f'{self.get_table_count(table, schema=schema):,}')
         else:
             logger.info('--dryrun--\n')
 
@@ -756,12 +966,11 @@ class Postgres(object):
                            'under development.'.format(table, self.database))
             logger.info(f'Table "{table}" not found in database "{self.database}", '
                         f'it will be created.')
-        else:
-            logger.info('Inserting records into {}...'.format(table))
             # Get table starting count
             logger.info('Starting count for {}: '
                         '{:,}'.format(table, self.get_table_count(table)))
-
+        else:
+            logger.info('Inserting records into {}...'.format(table))
         # Get unique IDs to remove duplicates if provided
         if unique_on is not None:
             records = _remove_dups_from_insert(records=records,
@@ -868,6 +1077,54 @@ class Postgres(object):
 
         return successful_df, failed_df
 
-# TODO: Create SQLQuery class
+    def get_geometry_type(self, table: str, schema: str = None):
+        get_geom_sql = f"SELECT type FROM public.geometry_columns " \
+                       f"WHERE f_table_schema = '{schema}' " \
+                       f"AND f_table_name = '{table}'"
+        results = self.execute_sql(get_geom_sql)
+        return results[0][0]
+
+    def get_invalid(self, table: str, schema: str = None,
+                    geometry: str = 'geometry',
+                    id_field: str = None):
+        """"""
+        if id_field is None:
+            id_field = '*'
+        if schema is not None:
+            table = f'{schema}.{table}'
+        invalid_sql = f"SELECT {id_field} FROM {table} " \
+                      f"WHERE ST_IsValid({geometry}) = false"
+        results = self.execute_sql(sql_query=invalid_sql)
+        return results
+
+    def make_valid(self, table: str, schema: str = None,
+                   geometry: str = 'geometry',
+                   id_field: str = None,
+                   ids: list = None):
+        geom_lut = {"POINT": 1,
+                    "LINESTRING": 2,
+                    "POLYGON": 3,
+                    "MULTIPOINT": 1,
+                    "MULTILINESTRING": 2,
+                    "MULTIPOLYGON": 3}
+
+        geometry_type = self.get_geometry_type(table=table, schema=schema)
+        make_valid_sql = f"UPDATE {schema}.{table} " \
+                         f"SET {geometry} = ST_MULTI(ST_CollectionExtract(" \
+                         f"ST_MakeValid({geometry}), {geom_lut[geometry_type]}))"
+        if ids:
+            make_valid_sql += f" WHERE {id_field} IN ({str(ids)[1:-1]})"
+        logger.info('Performing ST_MakeValid...')
+        logger.debug(f'SQL: {make_valid_sql}')
+        self.execute_sql(sql_query=make_valid_sql)
+
+
+# TODO:
+#  Create SQLQuery class
 #   - .select .where .fields .join etc.
 #  convert string variables in SQL querys (pgcatalog, etc. to constants)
+#  Make PostGIS subclass
+#   move:
+#     - make_valid
+#     - get_invalid
+#     - get_geometry_type
