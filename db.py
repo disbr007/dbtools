@@ -682,6 +682,7 @@ class Postgres(object):
                                     dryrun=dryrun)
         else:
             logger.info(f'Existing schema "{schema}" located.')
+            se = True
         # Check if table exists in schema, create if not
         qualified_table = f'{schema}.{table}'
         table_exists = self.table_exists(table=qualified_table, schema=schema)
@@ -693,6 +694,9 @@ class Postgres(object):
                                            index=index,
                                            dtype=dtype,
                                            dryrun=dryrun)
+        else:
+            logger.info(f'Existing table "{qualified_table}" located.')
+            te = True
         # Report count of table (if it exists (not a dryrun))
         if te:
             starting_table_count = self.get_table_count(table=table,
@@ -704,7 +708,8 @@ class Postgres(object):
     def df2postgres(self, df: pd.DataFrame, table: str, schema: str = None,
                     if_exists: str = 'fail', index: bool = False,
                     con: Union[sqlalchemy.engine.Engine,
-                               sqlalchemy.engine.Connection] = None, dtype: dict = None,
+                               sqlalchemy.engine.Connection] = None, 
+                    dtype: dict = None,
                     dryrun: bool = False,):
         logger.info(f'Inserting {len(df):,} records into {table}...')
         if schema:
@@ -717,6 +722,8 @@ class Postgres(object):
         if not dryrun:
             df.to_sql(name=table, schema=schema, con=con, if_exists=if_exists,
                       index=index, dtype=dtype)
+            logger.info(f'{schema}.{table} ending count: '
+                        f'{self.get_table_count(table, schema)}')
         else:
             logger.info('--dryrun--')
 
