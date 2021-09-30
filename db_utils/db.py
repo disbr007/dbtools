@@ -268,6 +268,7 @@ def intersect_aoi_where(aoi, geom_col):
 
 
 def drop_z_dim(gdf: gpd.GeoDataFrame):
+    # TODO: Move to geo_utils
     """Drop Z values from geodataframe geometries"""
     gdf.geometry = gdf.geometry.apply(
         lambda x: shapely.wkb.loads(shapely.wkb.dumps(x, output_dimension=2)))
@@ -433,16 +434,21 @@ class Postgres(object):
 
         return all_layers
 
-    def execute_sql(self, sql_query, commit=True):
+    def execute_sql(self, sql_query, commit=True, no_result_expected=False):
         """Execute the passed query on the database."""
         if not isinstance(sql_query, (sql.SQL, sql.Composable, sql.Composed)):
             sql_query = sql.SQL(sql_query)
-        # logger.debug('SQL query: {}'.format(sql_query))
+        logger.debug('SQL query: {}'.format(sql_query))
         self.cursor.execute(sql_query)
-        # try:
-        #     results = self.cursor.fetchall()
-        # except psycopg2.ProgrammingError as e:
-        #     if 'no results to fetch' in e.args:
+        if not no_result_expected:
+            try:
+                results = self.cursor.fetchall()
+            except psycopg2.ProgrammingError as e:
+                logger.error(e)
+                raise(e)
+        else:
+            results = None
+            # if 'no results to fetch' in e.args:
         #         TODO: Do this without an exception catch
                 # results = None
             # else:
@@ -450,14 +456,14 @@ class Postgres(object):
         if commit:
             self.connection.commit()
 
-        # return results
+        return results
 
     def schema_exists(self, schema):
         """True if schema exists"""
         db_schemas = self.list_schemas()
         return schema in db_schemas
 
-    def table_exists(self, table: str, schema: str, qualified: bool = True):
+    def table_exists(self, table: str, schema: str = None, qualified: bool = True):
         """
         True if table exists in schema
         Args:
@@ -471,7 +477,7 @@ class Postgres(object):
         Returns: bool
             True if table exists in schema
         """
-        if not qualified:
+        if not qualified or schema is not None:
             table = f'{schema}.{table}'
         schema_tables = self.list_tables(schemas=schema)
         return table in schema_tables
@@ -479,23 +485,30 @@ class Postgres(object):
     def create_schema(self, schema_name, if_not_exists=True, dryrun=False)\
             -> bool:
         """Creates a new schema of [schema_name]"""
-        if if_not_exists:
-            create_schema_sql = (sql.SQL(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
-                                 .format(schema_name=schema_name))
+        schema_name_exists = self.schema_exists(schema_name)
+        if schema_name_exists:
+            logger.debug('Schema already exists: {schema_name}')
         else:
-            create_schema_sql = (sql.SQL(f"CREATE SCHEMA {schema_name}")
-                                 .format(schema_name=schema_name))
-        logger.info(f'Creating schema: {schema_name}')
-        logger.debug('Creating schema:\n{}'
-                     .format(create_schema_sql.as_string(self.connection)))
-        if not dryrun:
-            self.execute_sql(create_schema_sql)
-        else:
-            logger.info('--dryrun--')
+            if if_not_exists:
+                # This shouldn't matter as the check is done above, but keeping
+                # it as a back up incase the above check fails for some reason
+                create_schema_sql = (sql.SQL(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
+                                    .format(schema_name=schema_name))
+            else:
+                create_schema_sql = (sql.SQL(f"CREATE SCHEMA {schema_name}")
+                                    .format(schema_name=schema_name))
+            logger.info(f'Creating schema: {schema_name}')
+            logger.debug('Creating schema:\n{}'
+                         .format(create_schema_sql.as_string(self.connection)))
+            if not dryrun:
+                self.execute_sql(create_schema_sql, no_result_expected=True)
+            else:
+                logger.info('--dryrun--')
 
-        schema_exists = self.schema_exists(schema_name)
+            schema_name_exists = self.schema_exists(schema_name)
 
-        return schema_exists
+        return schema_name_exists
+    
 
     # TODO: To make this work, need to add column: type mappings
     # def create_table(self, table_name, schema_name=None, qualified=False,
@@ -685,7 +698,7 @@ class Postgres(object):
             se = True
         # Check if table exists in schema, create if not
         qualified_table = f'{schema}.{table}'
-        table_exists = self.table_exists(table=qualified_table, schema=schema)
+        table_exists = self.table_exists(table=qualified_table, qualified=True)
         if not table_exists:
             logger.info(f'Table {qualified_table} not found, will be created.')
             te = self.create_table_like_df(table_name=qualified_table,
@@ -1090,6 +1103,12 @@ class Postgres(object):
                        f"AND f_table_name = '{table}'"
         results = self.execute_sql(get_geom_sql)
         return results[0][0]
+    
+    # def get_shapely_geom_type(self, table: str, schema: str):
+        # TODO: look-up table for POSTGIS to shapely geom type
+    #     get_one_sql = f"SELECT * FROM '{schema}.{table} LIMIT 1"
+    #     gdf = self.sql2gdf(get_one_sql)
+    #     geom_type = gdf.geometry.geom_type[0]
 
     def get_invalid(self, table: str, schema: str = None,
                     geometry: str = 'geometry',
@@ -1106,6 +1125,7 @@ class Postgres(object):
 
     def make_valid(self, table: str, schema: str = None,
                    geometry: str = 'geometry',
+                   multi_geom: bool = False,
                    id_field: str = None,
                    ids: list = None):
         geom_lut = {"POINT": 1,
@@ -1116,15 +1136,37 @@ class Postgres(object):
                     "MULTIPOLYGON": 3}
 
         geometry_type = self.get_geometry_type(table=table, schema=schema)
-        make_valid_sql = f"UPDATE {schema}.{table} " \
-                         f"SET {geometry} = ST_MULTI(ST_CollectionExtract(" \
-                         f"ST_MakeValid({geometry}), {geom_lut[geometry_type]}))"
+        if multi_geom:
+            make_valid_sql = f"UPDATE {schema}.{table} " \
+                             f"SET {geometry} = ST_MULTI(ST_CollectionExtract(" \
+                             f"ST_MakeValid({geometry}), {geom_lut[geometry_type]}))"
+        else:
+            make_valid_sql = f"UPDATE {schema}.{table} " \
+                             f"SET {geometry} = "\
+                             f"ST_MakeValid({geometry}), {geom_lut[geometry_type]})"
         if ids:
             make_valid_sql += f" WHERE {id_field} IN ({str(ids)[1:-1]})"
         logger.info('Performing ST_MakeValid...')
         logger.debug(f'SQL: {make_valid_sql}')
-        self.execute_sql(sql_query=make_valid_sql)
+        self.execute_sql(sql_query=make_valid_sql, no_result_expected=True)
 
+    def get_table_owner(self, table: str, schema: str):
+        owner_where = f"tablename = '{table}' AND schemaname = '{schema}'"
+        owner = self.get_values(table='pg_tables', schema='pg_catalog', columns='tableowner',
+                                where=owner_where)
+        return owner
+        
+    def alter_table_owner(self, table: str, schema: str, new_owner: str):
+        alter_table_sql = f"ALTER TABLE {schema}.{table} " \
+                          f"OWNER TO {new_owner}"
+        logger.info(f"Updating {schema}.{table} owner to: {new_owner}")
+        self.execute_sql(sql_query=alter_table_sql, no_result_expected=True)
+        
+    def alter_schema_owner(self, schema: str, new_owner: str):
+        alter_schema_sql = f"ALTER SCHEMA {schema} " \
+                           f"OWNER TO {new_owner}"  
+        logger.info(f"Updating {schema} owner to: {new_owner}")
+        self.execute_sql(alter_schema_sql, no_result_expected=True)
 
 # TODO:
 #  Create SQLQuery class

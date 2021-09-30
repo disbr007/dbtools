@@ -14,6 +14,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/disbr007/db_utils",
     packages=setuptools.find_packages(),
+    py_modules=['db_utils'],
     classifiers=[
         "Programming Language :: Python :: 3",
         "Operating System :: OS Independent",
