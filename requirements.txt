@@ -1,0 +1,16 @@
+fiona
+gdal
+geoalchemy2
+geopandas
+geos
+geotiff
+numpy
+pandas
+psycopg2
+retrying
+rtree
+scipy
+setuptools
+shapely
+sqlalchemy
+urllib3

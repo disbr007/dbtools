@@ -1,6 +1,7 @@
 import datetime
 import decimal
 import json
+import logging
 import re
 from pathlib import Path, PurePath
 import sys
@@ -16,18 +17,12 @@ from sqlalchemy import create_engine
 import sqlalchemy
 from tqdm import tqdm
 
-from .logging_utils import create_logger
+from dbtools import CONFIG_FILE
 
-logger = create_logger(__name__, 'sh', 'INFO')
+logger = logging.getLogger(__name__)
 
 # Supress pandas SettingWithCopyWarning
 pd.set_option('mode.chained_assignment', None)
-
-CONFIG_FILE = Path(__file__).parent / "config.json"
-if not CONFIG_FILE.exists():
-    logger.error('config.json not found. Should be created at: '
-                 '{}'.format(CONFIG_FILE))
-    sys.exit(-1)
 
 # Config keys
 HOSTS = 'hosts'
@@ -74,6 +69,7 @@ def get_db_config(host_name, db_name, config_file=CONFIG_FILE):
     else:
         logger.error('Config for host "{}" not found.'.format(host_name))
         raise KeyError
+
     # Confirm database is listed in host's config
     databases = db_config.pop(DATABASES)
     if db_name in databases:
