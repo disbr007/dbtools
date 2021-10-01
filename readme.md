@@ -1,4 +1,4 @@
-#### db_utils
+#### dbtools
 Tools for interacting with databases, specifically tested for 
 PostgreSQL and PostgreSQL/PostGIS databases.
 

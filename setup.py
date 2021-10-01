@@ -16,7 +16,7 @@ setuptools.setup(
     description="Tools for interacting with Postgres databases.",
     long_description=LONG_DESCRIPTION,
     long_description_content_type="text/markdown",
-    url="https://github.com/disbr007/db_utils",
+    url="https://github.com/disbr007/dbtools",
     package_dir={"":"."},
     packages=setuptools.find_packages(),
     py_modules=['db'],

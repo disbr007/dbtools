@@ -1,4 +1,4 @@
-from db_utils.db import Postgres
+from dbtools.db import Postgres
 
 
 # Connection information
