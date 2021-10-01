@@ -1,4 +1,4 @@
-#### dbtools
+# dbtools
 Tools for interacting with databases, specifically tested for 
 PostgreSQL and PostgreSQL/PostGIS databases.
 
@@ -64,6 +64,6 @@ with Postgres([host_name], [database_name]) as db_src:
 ```
 
 <!--- TODO
+- read hosts/dbs/username/passwords directly from .pgpass
 -use .ini connection files, e.g. https://www.postgresql.org/docs/9.1/libpq-pgservice.html
--create setup.py to allow for installation elsewhere
 ---> 

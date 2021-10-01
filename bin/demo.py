@@ -1,15 +1,14 @@
-from dbtools.db import Postgres
-
+from dbtools.pg import Postgres
 
 # Connection information
-HOST = 'sandwich'
+HOST = 'host_specified_in_config.json'
 # host = 'sandwich.pool.pgc.umn.edu'
-DATABASE = 'dgarchive'
-TABLE = 'master_fp'
+DATABASE = 'database_name'
+TABLE = 'mytable'
 
 with Postgres(host=HOST, database=DATABASE) as db_src:
-    # Make connection, for demo only, all other methods will do
-    # the connecting automatically
+    # Make connection, for demonstration only, all other 
+    # methods handle the connection automatically
     connection = db_src.connection
 
     # Example of querying table
@@ -24,6 +23,7 @@ with Postgres(host=HOST, database=DATABASE) as db_src:
     gdf = db_src.sql2gdf(sql_str=sql_str,
                          geom_col='wkb_geometry')
 
+    # Insert new records into table
     db_src.insert_new_records(records=gdf,
                               table='master_fp')
 

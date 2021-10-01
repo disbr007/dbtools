@@ -264,7 +264,7 @@ def intersect_aoi_where(aoi, geom_col):
 
 
 def drop_z_dim(gdf: gpd.GeoDataFrame):
-    # TODO: Move to geo_utils
+    # TODO: Move to gpdtools
     """Drop Z values from geodataframe geometries"""
     gdf.geometry = gdf.geometry.apply(
         lambda x: shapely.wkb.loads(shapely.wkb.dumps(x, output_dimension=2)))

@@ -19,7 +19,7 @@ setuptools.setup(
     url="https://github.com/disbr007/dbtools",
     package_dir={"":"."},
     packages=setuptools.find_packages(),
-    py_modules=['db'],
+    py_modules=['pg'],
     requires=DEPENDENCIES,
     classifiers=[
         "Programming Language :: Python :: 3",
