@@ -20,7 +20,7 @@ setuptools.setup(
     package_dir={"":"."},
     packages=setuptools.find_packages(),
     py_modules=['pg'],
-    requires=DEPENDENCIES,
+    install_requires=DEPENDENCIES,
     classifiers=[
         "Programming Language :: Python :: 3",
         "Operating System :: OS Independent",

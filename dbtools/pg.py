@@ -5,14 +5,13 @@ import logging
 import re
 from pathlib import Path, PurePath
 import sys
-from typing import Union, Tuple, List, AnyStr
+from typing import Union
 
 import geopandas as gpd
 import pandas as pd
 import psycopg2
 from psycopg2 import sql
 import shapely
-from shapely.geometry import Point
 from sqlalchemy import create_engine
 import sqlalchemy
 from tqdm import tqdm
@@ -20,6 +19,7 @@ from tqdm import tqdm
 from dbtools import CONFIG_FILE
 
 logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler)
 
 # Supress pandas SettingWithCopyWarning
 pd.set_option('mode.chained_assignment', None)
@@ -504,7 +504,6 @@ class Postgres(object):
             schema_name_exists = self.schema_exists(schema_name)
 
         return schema_name_exists
-    
 
     # TODO: To make this work, need to add column: type mappings
     # def create_table(self, table_name, schema_name=None, qualified=False,
@@ -692,26 +691,28 @@ class Postgres(object):
         else:
             logger.info(f'Existing schema "{schema}" located.')
             se = True
+
         # Check if table exists in schema, create if not
         qualified_table = f'{schema}.{table}'
         table_exists = self.table_exists(table=qualified_table, qualified=True)
-        if not table_exists:
-            logger.info(f'Table {qualified_table} not found, will be created.')
-            te = self.create_table_like_df(table_name=qualified_table,
-                                           df=df,
-                                           qualified=True,
-                                           index=index,
-                                           dtype=dtype,
-                                           dryrun=dryrun)
-        else:
+        if table_exists:
             logger.info(f'Existing table "{qualified_table}" located.')
             te = True
-        # Report count of table (if it exists (not a dryrun))
-        if te:
+            # Report count of table (if it exists (not a dryrun))
             starting_table_count = self.get_table_count(table=table,
                                                         schema=schema)
             logger.info(f'{schema}.{table} starting count: '
                         f'{starting_table_count}')
+        else:
+            logger.info(f'Table {qualified_table} not found, will be created.')
+            te = False
+            # te = self.create_table_like_df(table_name=qualified_table,
+            #                                df=df,
+            #                                qualified=True,
+            #                                index=index,
+            #                                dtype=dtype,
+            #                                dryrun=dryrun)
+
         return se, te
 
     def df2postgres(self, df: pd.DataFrame, table: str, schema: str = None,
@@ -973,18 +974,22 @@ class Postgres(object):
             return
 
         # Check if table exists
-        if table not in self.list_db_all():
-            logger.warning('Table "{}" not found in database "{}" '
+        if schema is not None:
+            check_table = f'{schema}.{table}'
+        else:
+            check_table = table
+        if check_table not in self.list_db_all():
+            logger.warning(f'Table "{check_table}" not found in database "{self.database}" '
                            'If a fully qualified table name was provided '
                            '(i.e. db.schema.table_name) this message may be '
                            'displayed in error. Support for checking for '
                            'presence of tables using fully qualified names '
-                           'under development.'.format(table, self.database))
+                           'under development.')
             logger.info(f'Table "{table}" not found in database "{self.database}", '
                         f'it will be created.')
             # Get table starting count
             logger.info('Starting count for {}: '
-                        '{:,}'.format(table, self.get_table_count(table)))
+                        '{:,}'.format(table, self.get_table_count(table, schema=schema)))
         else:
             logger.info('Inserting records into {}...'.format(table))
         # Get unique IDs to remove duplicates if provided
@@ -1087,7 +1092,7 @@ class Postgres(object):
         if not dryrun:
             logger.info('New count for {}.{}: '
                         '{:,}'.format(self.database, table,
-                                      self.get_table_count(table)))
+                                      self.get_table_count(table, schema=schema)))
         else:
             logger.info('--dryrun--')
 
@@ -1163,6 +1168,78 @@ class Postgres(object):
                            f"OWNER TO {new_owner}"  
         logger.info(f"Updating {schema} owner to: {new_owner}")
         self.execute_sql(alter_schema_sql, no_result_expected=True)
+
+    def refresh_materialized_view(self, matview: str, schema: str):
+        logger.info(f"Refreshing materialized view: {schema}.{matview}")
+        refresh_statement = sql.SQL("REFRESH MATERIALIZED VIEW "
+                                    "{schema}.{matview}").format(schema=sql.Identifier(schema), 
+                                                                 matview=sql.Identifier(matview))
+        logger.debug(refresh_statement.as_string(self.connection))
+        self.execute_sql(refresh_statement, no_result_expected=True)
+
+    def drop_table(self, table: str, schema: str, cascade: bool = False):
+        logger.info(f"Dropping table: {schema}.{table}")
+        drop_statement = "DROP TABLE {schema}.{table}"
+        if cascade:
+            drop_statement += " CASCADE"
+        drop_statement = sql.SQL(drop_statement).format(
+            schema=sql.Identifier(schema), 
+            table=sql.Identifier(table))
+        logger.debug(drop_statement.as_string(self.connection))
+        self.execute_sql(drop_statement, no_result_expected=True)
+
+    def rename_table(self, existing_table: str, new_table: str, schema: str):
+        logger.info(f'Renaming table: {schema}.{existing_table}')
+        rename_statement = sql.SQL(f"ALTER TABLE {schema}.{existing_table} "
+                                   f"RENAME TO {new_table}").format(
+                                       schema=sql.Identifier(schema),
+                                       existing_table=sql.Identifier(existing_table),
+                                       new_table=sql.Identifier(new_table)
+                                   )
+        logger.debug(rename_statement.as_string(self.connection))
+        self.execute_sql(rename_statement, no_result_expected=True)
+
+    def hotswap_table(self, active_table: str, temp_table: str, schema: str,
+                      max_count_diff=0):
+        logger.info(f'Hotswapping tables: {temp_table}->{active_table}')
+        # TODO: ideally some validation happens before the drop
+        #       - counts are within expected difference range
+        #       - geometries are valid
+        #       - etc.
+        #       - move all validation to _validate_hotswap
+        if max_count_diff is not None:
+            counts_ok = self._compare_counts(table1=active_table, table2=temp_table, schema1=schema,
+                                             max_diff=max_count_diff)
+            if counts_ok is False:
+                logger.warning('Count validation failed, aborting hotswap.')
+                return -1
+        # self.drop_table(table=active_table, schema=schema)
+        # Rename active to dated table name
+        outdated_table = f'{active_table}_outdated'
+        if self.table_exists(table=outdated_table, schema=schema):
+            self.drop_table(outdated_table, schema=schema, cascade=True)
+        self.rename_table(existing_table=active_table, new_table=outdated_table, schema=schema)
+        # Rename temp table to active table
+        self.rename_table(existing_table=temp_table, new_table=active_table, schema=schema)
+        # TODO: Ideally more validation, rollback if needed
+        return 1
+
+    def _compare_counts(self, table1: str, table2: str, schema1: str, schema2: str = None, 
+                        max_diff=0):
+        if schema2 is None:
+            schema2 = schema1
+        logger.info(f'Comparing counts for {schema1}.{table1} and {schema2}.{table2}')
+        t1_count = self.get_table_count(table=table1, schema=schema1)
+        t2_count = self.get_table_count(table=table2, schema=schema2)
+        counts_ok = abs(t1_count - t2_count) <= max_diff
+        logger.info(f'Counts OK: {counts_ok}')
+        if counts_ok is False:
+            logger.warning(f'Counts are not OK:\n'
+                           f'{schema1}.{table1}: {t1_count}\n'
+                           f'{schema2}.{table2}: {t2_count}\n'
+                           f'{t1_count-t2_count} <= {max_diff} = False')
+        return counts_ok
+
 
 # TODO:
 #  Create SQLQuery class
