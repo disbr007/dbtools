@@ -19,7 +19,7 @@ from tqdm import tqdm
 from dbtools import CONFIG_FILE
 
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler)
+# logger.addHandler(logging.NullHandler)
 
 # Supress pandas SettingWithCopyWarning
 pd.set_option('mode.chained_assignment', None)
@@ -281,10 +281,11 @@ class Postgres(object):
     """
     _instance = None
 
-    def __init__(self, host, database):
+    def __init__(self, host, database, connection_params: dict = None):
         self.db_config = get_db_config(host, database)
         self.host = host
         self.database = database
+        self.connection_params = connection_params
         self._connection = None
         self._cursor = None
         self._py2sql_types = {
@@ -307,7 +308,8 @@ class Postgres(object):
         """Establish connection to database."""
         if self._connection is None:
             try:
-                self._connection = psycopg2.connect(**self.db_config)
+                self._connection = psycopg2.connect(**self.db_config,)
+                                                    # **self.connection_params)
 
             except (psycopg2.Error, psycopg2.OperationalError) as error:
                 Postgres._instance = None
@@ -489,10 +491,10 @@ class Postgres(object):
                 # This shouldn't matter as the check is done above, but keeping
                 # it as a back up incase the above check fails for some reason
                 create_schema_sql = (sql.SQL(f"CREATE SCHEMA IF NOT EXISTS {schema_name}")
-                                    .format(schema_name=schema_name))
+                                     .format(schema_name=schema_name))
             else:
                 create_schema_sql = (sql.SQL(f"CREATE SCHEMA {schema_name}")
-                                    .format(schema_name=schema_name))
+                                     .format(schema_name=schema_name))
             logger.info(f'Creating schema: {schema_name}')
             logger.debug('Creating schema:\n{}'
                          .format(create_schema_sql.as_string(self.connection)))
@@ -1237,7 +1239,7 @@ class Postgres(object):
             logger.warning(f'Counts are not OK:\n'
                            f'{schema1}.{table1}: {t1_count}\n'
                            f'{schema2}.{table2}: {t2_count}\n'
-                           f'{t1_count-t2_count} <= {max_diff} = False')
+                           f'{t1_count - t2_count} <= {max_diff} = False')
         return counts_ok
 
 
