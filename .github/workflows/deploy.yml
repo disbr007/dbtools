@@ -10,29 +10,29 @@ on:
 
 jobs:
   deploy_version:
-  timeout-minutes: 5
-  steps:
-    - uses: actions/checkout@v2
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-west-2
-    - name: Inject slug/short variables
-      uses: rlespinasse/github-slug-action@v2.x
-    - name: Get release notes
-      run: |
-        bash cicd/create-release-notes.sh ${{ env.GITHUB_REF_SLUG }} ${{ env.build }} ${{ env.IMAGE_TAG }}
-    - name: Create Release
-      id: create_release
-      if: startsWith(github.ref, 'refs/tags/v')
-      uses: actions/create-release@v1
-      env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
-      with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          body_path: RELEASE_NOTES.md
-          draft: false
-          prerelease: false
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v2
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v2.x
+      - name: Get release notes
+        run: |
+          bash cicd/create-release-notes.sh ${{ env.GITHUB_REF_SLUG }} ${{ env.build }} ${{ env.IMAGE_TAG }}
+      - name: Create Release
+        id: create_release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/create-release@v1
+        env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+        with:
+            tag_name: ${{ github.ref }}
+            release_name: Release ${{ github.ref }}
+            body_path: RELEASE_NOTES.md
+            draft: false
+            prerelease: false
