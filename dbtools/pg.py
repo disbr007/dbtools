@@ -40,8 +40,9 @@ DEF_SKIP_SCHEMAS = ['information_schema',
 FAIL = 'fail'
 
 
-def get_db_config(host_name, db_name, config_file=CONFIG_FILE):
+def get_db_config(host_name, db_name, config_file=CONFIG_FILE) -> dict:
     # TODO: validate config entries
+    # TODO: convert to use .pgpass
     if not isinstance(config_file, PurePath):
         config_file = Path(config_file)
     if not config_file.exists():
@@ -281,11 +282,10 @@ class Postgres(object):
     """
     _instance = None
 
-    def __init__(self, host, database, connection_params: dict = None):
+    def __init__(self, host, database, connect_args: dict = None):
         self.db_config = get_db_config(host, database)
         self.host = host
         self.database = database
-        self.connection_params = connection_params
         self._connection = None
         self._cursor = None
         self._py2sql_types = {
@@ -302,21 +302,21 @@ class Postgres(object):
             list: sqlalchemy.sql.sqltypes.ARRAY,
             dict: sqlalchemy.sql.sqltypes.JSON
         }
-
+        if connect_args:
+            self.db_config.update(connect_args)
+            
     @property
     def connection(self):
         """Establish connection to database."""
         if self._connection is None:
             try:
                 self._connection = psycopg2.connect(**self.db_config,)
-                                                    # **self.connection_params)
-
             except (psycopg2.Error, psycopg2.OperationalError) as error:
                 Postgres._instance = None
                 logger.error('Error connecting to {database} at '
                              '{host}'.format(**self.db_config))
                 logger.error(error)
-                sys.exit(-1)
+                # sys.exit(-1)
             else:
                 logger.debug('Connection to {database} at {host} '
                              'established.'.format(**self.db_config))
