@@ -18,7 +18,7 @@ jobs:
         uses: rlespinasse/github-slug-action@v3.x
       - name: Get release notes
         run: |
-          bash cicd/create-release-notes.sh ${{ env.GITHUB_REF_SLUG }} ${{ env.GITHUB_ACTOR }}
+          bash cicd/create-release-notes.sh ${{ env.GITHUB_REF_SLUG }} ${{ github.actor }}
       - name: Create Release
         id: create_release
         if: startsWith(github.ref, 'refs/tags/v')
