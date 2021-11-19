@@ -35,6 +35,8 @@ jobs:
         run: |
           sed -i -e 's/version:.*/version: ${{ env.GITHUB_REF_SLUG }}/g' env.yml
           cat env.yml
+      - name: Commit version
+        run:
           git config --global user.name 'disbr007'
           git config --global user.email 'your-username@users.noreply.github.com'
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$GITHUB_REPOSITORY
