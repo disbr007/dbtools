@@ -15,15 +15,16 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@v3.x
       - name: Get release notes
-        # if: startsWith(github.ref, 'refs/tags/v')
         run: |
           bash cicd/create-release-notes.sh ${{ env.GITHUB_REF_SLUG }} ${{ github.actor }}
       - name: Create Release
         id: create_release
-        # if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/create-release@v1
         env:
             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
@@ -34,18 +35,18 @@ jobs:
             draft: false
             prerelease: false
       - name: Update version
-        # if: startsWith(github.ref, 'refs/tags/v')
         run: |
           sed -i -e 's/version:.*/version: ${{ env.GITHUB_REF_SLUG }}/g' env.yml
           cat env.yml
-      - name: Commit and push changes
-        # if: startsWith(github.ref, 'refs/tags/v')
+      - name: Commit version change
         run: |
           git config --global user.name "disbr007"
           git config --global user.email "disbr007@umn.edu"
-          git checkout -b update-version
           git add env.yml
-          git commit -m "commit update version"
-          git checkout main
-          git merge temp-branch
-          git push origin main
+          git commit -m "update version"
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          force: true
+        
