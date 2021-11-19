@@ -37,4 +37,5 @@ jobs:
       #     echo "::set-output name=version=version::$version"
       - name: Update version
         run: |
-          sed -i 's/version:.*/version: ${{ env.GITHUB_REF_SLUG }}/g' env.yml
+          stat env.yml
+        # sed -i 's/version:.*/version: ${{ env.GITHUB_REF_SLUG }}/g' env.yml
