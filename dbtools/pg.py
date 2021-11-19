@@ -56,6 +56,7 @@ def get_db_config(host_name, db_name, config_file=CONFIG_FILE) -> dict:
         logger.error('Error loading config file: {}'.format(config_file))
         logger.error(e)
         sys.exit(-1)
+        
 
     # Locate host
     host_short_names = config[HOSTS].keys()
