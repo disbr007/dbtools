@@ -40,8 +40,7 @@ jobs:
           cat env.yml
       - name: Commit version change
         run: |
-          git config --global user.name "disbr007"
-          git config --global user.email "disbr007@umn.edu"
+          git config --global user.name "${{ github.actor }}"
           git add env.yml
           git commit -m "update version"
       - name: Push changes
