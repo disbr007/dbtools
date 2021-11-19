@@ -31,10 +31,7 @@ jobs:
             body_path: RELEASE_NOTES.md
             draft: false
             prerelease: false
-      # - id: get-version
-      #   run: |
-      #     version=$(echo ${{ github.ref }} | cut -d/ -f3)
-      #     echo "::set-output name=version=version::$version"
       - name: Update version
         run: |
           sed -i -e 's/version:.*/version: ${{ env.GITHUB_REF_SLUG }}/g' env.yml
+          cat env.yml
