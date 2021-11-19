@@ -46,4 +46,4 @@ jobs:
 
           git add env.yml
           git commit -m "commit update version"
-          git push
+          git push HEAD:main
