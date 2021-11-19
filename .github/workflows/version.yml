@@ -31,6 +31,10 @@ jobs:
             body_path: RELEASE_NOTES.md
             draft: false
             prerelease: false
+      - id: get-version
+        run: |
+          version=$(echo ${{ github.ref }} | cut -d/ -f3)
+          echo "::set-output name=version=version::$version"
       - name: Update version
         run: |
-          sed -i 's/version:.*/version: ${{github.ref}}/g' env.yml
+          sed -i 's/version:.*/version: ${{ steps.get-version.outputs.version }}/g' env.yml
