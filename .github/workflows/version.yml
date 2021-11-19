@@ -43,7 +43,9 @@ jobs:
         run: |
           git config --global user.name "your username"
           git config --global user.email "your email"
-
+          git branch update-version
           git add env.yml
           git commit -m "commit update version"
-          git push HEAD:main
+          git checkout main
+          git merge temp-branch
+          git push origin main
