@@ -43,7 +43,7 @@ jobs:
         run: |
           git config --global user.name "disbr007"
           git config --global user.email "disbr007@umn.edu"
-          git branch update-version
+          git checkout -b update-version
           git add env.yml
           git commit -m "commit update version"
           git checkout main
