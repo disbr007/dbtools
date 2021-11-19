@@ -32,7 +32,6 @@ jobs:
             draft: false
             prerelease: false
       - name: Update version
-        uses: action-owner/action-repo@ref
         run: |
           sed -i -e 's/version:.*/version: ${{ env.GITHUB_REF_SLUG }}/g' env.yml
           cat env.yml
