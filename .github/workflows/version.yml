@@ -35,11 +35,15 @@ jobs:
         run: |
           sed -i -e 's/version:.*/version: ${{ env.GITHUB_REF_SLUG }}/g' env.yml
           cat env.yml
-      - name: Commit version
-        run: |
-          git config --global user.name 'disbr007'
-          git config --global user.email 'your-username@users.noreply.github.com'
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$GITHUB_REPOSITORY
-          git checkout "${GITHUB_HEAD_REF}"
-          git commit -am "Update version"
-          git push
+      - name: switching from HTTPS to SSH
+        run: git remote set-url origin ${{ secrets.ssh }}
+      - name: check for changes
+        run: git status
+      - name: stage changed files
+        run: git add .
+      - name: commit changed files
+        run: git commit -m "updating version"
+      - name: fetch from main
+        run: git fetch origin main
+      - name: push code to master
+        run: git push origin HEAD:main
