@@ -41,8 +41,8 @@ jobs:
       - name: Commit and push changes
         # if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          git config --global user.name "your username"
-          git config --global user.email "your email"
+          git config --global user.name "disbr007"
+          git config --global user.email "disbr007@umn.edu"
           git branch update-version
           git add env.yml
           git commit -m "commit update version"
