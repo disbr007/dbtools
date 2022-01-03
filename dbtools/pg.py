@@ -486,7 +486,7 @@ class Postgres(object):
         """Creates a new schema of [schema_name]"""
         schema_name_exists = self.schema_exists(schema_name)
         if schema_name_exists:
-            logger.debug('Schema already exists: {schema_name}')
+            logger.debug(f'Schema already exists: {schema_name}')
         else:
             if if_not_exists:
                 # This shouldn't matter as the check is done above, but keeping
@@ -624,6 +624,32 @@ class Postgres(object):
 
         return columns
 
+    def get_table_unique_cols(self, table, schema=None):
+        """Gets the pkey(s) of table"""
+        if schema is None:
+            schema = 'public'
+        unique_sql = sql.SQL(
+            """
+            SELECT
+                a.attname
+            FROM pg_class c
+                INNER JOIN pg_namespace n ON n.oid = c.relnamespace
+                INNER JOIN pg_attribute a ON a.attrelid = c.oid
+                LEFT JOIN pg_index i
+                    ON i.indrelid = c.oid
+                        AND a.attnum = ANY (i.indkey[0:(i.indnkeyatts - 1)])
+            WHERE
+                a.attnum > 0 AND
+                nspname = '{}' AND
+                relname = '{}' AND
+                i.indisunique is true;
+            """.format(schema, table))
+        results = self.execute_sql(unique_sql)
+        unique_cols = [record[0] for record in results]
+        logger.debug('Unique columns located for {}.{}: {}'.format(schema, table, unique_cols))
+        
+        return unique_cols
+        
     def get_values(self, table, columns, schema=None, distinct=False, where=None):
         """Get values in the passed columns(s) in the passed table. If
         distinct, unique values returned (across all columns passed)"""
@@ -723,6 +749,7 @@ class Postgres(object):
                     con: Union[sqlalchemy.engine.Engine,
                                sqlalchemy.engine.Connection] = None, 
                     dtype: dict = None,
+                    handle_json: bool = True,
                     dryrun: bool = False,):
         logger.info(f'Inserting {len(df):,} records into {table}...')
         if schema:
@@ -732,6 +759,11 @@ class Postgres(object):
         te, se = self.prep_db_for_upload(df=df, table=table, schema=schema,
                                          dtype=dtype,
                                          dryrun=dryrun)
+        # Convert to json if requested
+        if handle_json:
+            dict_cols = [col for col in df.columns if isinstance(df[col][0], dict)]
+            for dc in dict_cols:
+                df[dc] = df[dc].apply(lambda x: json.dumps(x))
         if not dryrun:
             df.to_sql(name=table, schema=schema, con=con, if_exists=if_exists,
                       index=index, dtype=dtype)
@@ -1106,7 +1138,13 @@ class Postgres(object):
                        f"WHERE f_table_schema = '{schema}' " \
                        f"AND f_table_name = '{table}'"
         results = self.execute_sql(get_geom_sql)
-        return results[0][0]
+        if len(results) == 0:
+            logger.warning(f'Geometry column for {schema}{table} not found in public.geometry_columns - likely '
+                           'table does not have geometry.')
+            geometry_type = None
+        else:
+            geometry_type = results[0][0]
+        return geometry_type
     
     # def get_shapely_geom_type(self, table: str, schema: str):
         # TODO: look-up table for POSTGIS to shapely geom type
@@ -1209,7 +1247,7 @@ class Postgres(object):
         #       - counts are within expected difference range
         #       - geometries are valid
         #       - etc.
-        #       - move all validation to _validate_hotswap
+        #       -> move all validation to new _validate_hotswap() method
         if max_count_diff is not None:
             counts_ok = self._compare_counts(table1=active_table, table2=temp_table, schema1=schema,
                                              max_diff=max_count_diff)
