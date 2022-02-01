@@ -6,7 +6,8 @@ __version__ = '0.1'
 
 logger = logging.getLogger(__name__)
 
-CONFIG_FILE = Path(__file__).parent / "config.json"
-if not CONFIG_FILE.exists():
-    logger.error('config.json not found. Should be created at: '
-                 '{}'.format(CONFIG_FILE))
+# TODO: Improve how this is located (users home, here, environmental variable, etc.)
+CONFIG_FILE = Path(__file__).parent / "dbtools-config.yml"
+# if not CONFIG_FILE.exists():
+    # logger.error('config.json not found. Should be created at: '
+                #  '{}'.format(CONFIG_FILE))

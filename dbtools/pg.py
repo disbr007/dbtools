@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import datetime
 import decimal
 import json
@@ -11,10 +12,13 @@ import geopandas as gpd
 import pandas as pd
 import psycopg2
 from psycopg2 import sql
+from pydantic import BaseModel
 import shapely
 from sqlalchemy import create_engine
 import sqlalchemy
 from tqdm import tqdm
+from typing import List
+import yaml
 
 from dbtools import CONFIG_FILE
 
@@ -38,6 +42,20 @@ DATABASE = 'database'
 DEF_SKIP_SCHEMAS = ['information_schema',
                     'pg_catalog']
 FAIL = 'fail'
+
+
+
+class ConnectionProfile(BaseModel):
+    nickname: str
+    default: bool = False
+    host: str
+    port: int
+    databases: List[str]
+    user: str
+
+
+class ConnectionConfig(BaseModel):
+    connection_profiles: List[ConnectionProfile]
 
 
 def get_db_config(host_name, db_name, config_file=CONFIG_FILE) -> dict:
@@ -273,6 +291,7 @@ def drop_z_dim(gdf: gpd.GeoDataFrame):
     return gdf
 
 
+@dataclass
 class Postgres(object):
     """
     Class for interacting with Postgres database using psycopg2. This
@@ -283,10 +302,14 @@ class Postgres(object):
     """
     _instance = None
 
-    def __init__(self, host, database, connect_args: dict = None):
-        self.db_config = get_db_config(host, database)
-        self.host = host
+    def __init__(self, database: str, host: str = None, user: str = None, 
+                 connection_profile: str = None):
         self.database = database
+        # self.db_config = get_db_config(host, database)
+        self.user = user
+        self.host = host
+        self.connection_profile = connection_profile
+        self._connection_config = None
         self._connection = None
         self._cursor = None
         self._py2sql_types = {
@@ -303,41 +326,68 @@ class Postgres(object):
             list: sqlalchemy.sql.sqltypes.ARRAY,
             dict: sqlalchemy.sql.sqltypes.JSON
         }
-        if connect_args:
-            self.db_config.update(connect_args)
-            
-    @property
-    def connection(self):
-        """Establish connection to database."""
-        if self._connection is None:
-            try:
-                self._connection = psycopg2.connect(**self.db_config,)
-            except (psycopg2.Error, psycopg2.OperationalError) as error:
-                Postgres._instance = None
-                logger.error('Error connecting to {database} at '
-                             '{host}'.format(**self.db_config))
-                logger.error(error)
-                # sys.exit(-1)
-            else:
-                logger.debug('Connection to {database} at {host} '
-                             'established.'.format(**self.db_config))
-
-        return self._connection
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if not self.connection.closed:
+        if self.connection is not None and not self.connection.closed:
             if not self.cursor.closed:
                 self.cursor.close()
             self.connection.close()
 
     def __del__(self):
-        if not self.connection.closed:
+        if self.connection is not None and not self.connection.closed:
             if not self.cursor.closed:
                 self.cursor.close()
             self.connection.close()
+
+    # def __post_init__(self):
+    #     self._determine_connection_profile()
+
+    # def _load_connection_config(self):
+    #     with open(CONFIG_FILE, 'r') as src:
+    #         return ConnectionConfig(connection_profiles=[ConnectionProfile(cp) for cp in 
+    #                                                      yaml.safe_load(src)['connection_profiles']])
+
+    # def _determine_connection_profile(self):
+    #     if self.connection_profile:
+    #         for cp in self.connection_config.connection_profiles:
+    #             if cp.nickname == self._connection_profile:
+    #                 self.connection_profile = cp
+    #     elif any(self.user is None, self.host is None):
+    #         for cp in self.connection_config.connection_profiles:
+    #             if cp.default is True:
+    #                 self.connection_profile = cp
+    #     self.user = self.connection_profile.user
+    #     self.host = self.connection_profile.host
+    #     if self.database not in self.connection_profile.databases:
+    #         logger.error('Database: {self.database} not included in connection profile.')
+
+    # @property
+    # def connection_config(self):
+    #     if self._connection_config is None:
+    #         self._connection_config = self._load_connection_config()
+    #     return self._connection_config
+        
+    @property
+    def connection(self):
+        """Establish connection to database."""
+        if self._connection is None:
+            try:
+                self._connection = psycopg2.connect(host=self.host,
+                                                    database=self.database,
+                                                    user=self.user,
+                    # **self.db_config,
+                    )
+            except (psycopg2.Error, psycopg2.OperationalError) as error:
+                Postgres._instance = None
+                logger.error(f'Error connecting to {self.database} at {self.host}')
+                raise error
+            else:
+                logger.debug(f'Connection to {self.database} at {self.host} established.')
+
+        return self._connection
 
     @property
     def cursor(self):
@@ -350,8 +400,7 @@ class Postgres(object):
 
     def get_engine(self):
         """Create sqlalchemy.engine object."""
-        engine = create_engine('postgresql+psycopg2://'
-                               '{user}:{password}@{host}/{database}'.format(**self.db_config))
+        engine = create_engine(f'postgresql+psycopg2://{self.user}@{self.host}/{self.database}')
 
         return engine
 

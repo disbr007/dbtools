@@ -1,0 +1,17 @@
+connection_profiles:
+  - nickname: aoassetdb
+    default: true
+    host: aoassetdb.cpvfmepzslta.us-west-2.rds.amazonaws.com:5432:ao_dev:jeffdisbrow
+    port: 5432
+    databases: 
+      - grid_detect
+      - client_db
+      - wetland
+      - spacetime
+    user: jeffdisbrow
+  - nickname: ao-db
+    host: ao-db.cpvfmepzslta.us-west-2.rds.amazonaws.com
+    port: 5432
+    databases:
+      - spacetime
+    user: jeffdisbrow
