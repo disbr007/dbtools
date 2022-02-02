@@ -331,16 +331,22 @@ class Postgres(object):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.connection is not None and not self.connection.closed:
-            if not self.cursor.closed:
-                self.cursor.close()
-            self.connection.close()
+        try:
+            if self.connection is not None and not self.connection.closed:
+                if not self.cursor.closed:
+                    self.cursor.close()
+                self.connection.close()
+        except psycopg2.OperationalError as e:
+            logger.error('Error attempt to ensure connection closed.')
 
     def __del__(self):
-        if self.connection is not None and not self.connection.closed:
-            if not self.cursor.closed:
-                self.cursor.close()
-            self.connection.close()
+        try:
+            if self.connection is not None and not self.connection.closed:
+                if not self.cursor.closed:
+                    self.cursor.close()
+                self.connection.close()
+        except psycopg2.OperationalError as e:
+            logger.error('Error attempt to ensure connection closed.')
 
     # def __post_init__(self):
     #     self._determine_connection_profile()
@@ -373,6 +379,7 @@ class Postgres(object):
     @property
     def connection(self):
         """Establish connection to database."""
+        # TODO: fix this - make function get_connection() that's called when a connection is needed
         if self._connection is None:
             try:
                 self._connection = psycopg2.connect(host=self.host,
