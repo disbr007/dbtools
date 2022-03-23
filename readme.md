@@ -63,6 +63,15 @@ with Postgres([host_name], [database_name]) as db_src:
     gdf = db_src.sql2gdf(sql_str)
 ```
 
+## Versioning
+1. Manually bump version in `dbtools/dbtools/__init__.py`
+2. Add a new git tag. GH Actions will automatically create a release when a version tag is pushed.
+```
+git tag v[version]
+git push origin --tags
+```
+
+_TODO: read version from `__init__.py` automatically_
 <!--- TODO
 - read hosts/dbs/username/passwords directly from .pgpass
 -use .ini connection files, e.g. https://www.postgresql.org/docs/9.1/libpq-pgservice.html
