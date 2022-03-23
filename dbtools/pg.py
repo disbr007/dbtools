@@ -434,7 +434,7 @@ class Postgres(object):
             schemas.extend(infoschemas)
         # Remove duplicates
         schemas = set([s[0] for s in schemas])
-        logger.debug('Schemas: {}'.format(schemas))
+        logger.debug(f'Schema count: {len(schemas)}')
         return schemas
 
     def list_tables(self, schemas=None, skip_schemas=DEF_SKIP_SCHEMAS):
@@ -452,7 +452,7 @@ class Postgres(object):
 
         qualified_tables = ['{}.{}'.format(s, t) for s, t in schemas_tables
                             if s not in skip_schemas]
-        logger.debug('Tables: {}'.format(qualified_tables))
+        logger.debug(f'Table count: {len(qualified_tables)}')
 
         return qualified_tables
 
@@ -703,9 +703,9 @@ class Postgres(object):
         results = self.execute_sql(unique_sql)
         unique_cols = [record[0] for record in results]
         logger.debug('Unique columns located for {}.{}: {}'.format(schema, table, unique_cols))
-        
+
         return unique_cols
-        
+
     def get_values(self, table, columns, schema=None, distinct=False, where=None):
         """Get values in the passed columns(s) in the passed table. If
         distinct, unique values returned (across all columns passed)"""
@@ -1082,7 +1082,7 @@ class Postgres(object):
             logger.info('Starting count for {}: '
                         '{:,}'.format(table, self.get_table_count(table, schema=schema)))
         else:
-            logger.info('Inserting records into {}...'.format(table))
+            logger.info(f'Inserting records into {table}...')
         # Get unique IDs to remove duplicates if provided
         if unique_on is not None:
             records = _remove_dups_from_insert(records=records,
@@ -1274,9 +1274,13 @@ class Postgres(object):
         logger.debug(refresh_statement.as_string(self.connection))
         self.execute_sql(refresh_statement, no_result_expected=True)
 
-    def drop_table(self, table: str, schema: str, cascade: bool = False):
+    def drop_table(self, table: str, schema: str, if_exists: bool = True, cascade: bool = False):
         logger.info(f"Dropping table: {schema}.{table}")
-        drop_statement = "DROP TABLE {schema}.{table}"
+        drop_statement = "DROP TABLE"
+        if if_exists:
+            drop_statement += " IF EXISTS"
+            
+        drop_statement += " {schema}.{table}"
         if cascade:
             drop_statement += " CASCADE"
         drop_statement = sql.SQL(drop_statement).format(
