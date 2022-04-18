@@ -1355,7 +1355,7 @@ class Postgres(object):
         """Preform check on table name length to ensure that it falls
         within PostgreSQL limits of 63 characters.
         modifyName will try to replace "-" and "_" to get name length
-        within limit """
+        within limit."""
         tn = table_name
         replacementChars = ["_", "-"]
 
