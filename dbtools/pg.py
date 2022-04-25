@@ -791,7 +791,7 @@ class Postgres(object):
             logger.info(f'{schema}.{table} starting count: '
                         f'{starting_table_count}')
         else:
-            logger.info(f'Table {qualified_table} not found in schema {schema}')
+            logger.info(f'Table {qualified_table} not found.')
             te = False
             # te = self.create_table_like_df(table_name=qualified_table,
             #                                df=df,
