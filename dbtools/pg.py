@@ -622,7 +622,7 @@ class Postgres(object):
         df = df[0:0]
         if qualified:
             schema_name, table_name = table_name.split('.')
-        table_name = self.validatePGNameLength(table_name, modifyTableName=modifyTableName)
+        table_name = self.validate_pgtable_name_Length(table_name, modifyTableName=modifyTableName)
         logger.info(f'Creating table: {table_name}')
         if schema_name:
             logger.info(f'In schema: {schema_name}')
@@ -810,7 +810,7 @@ class Postgres(object):
                     handle_json: bool = True,
                     dryrun: bool = False,
                     modifyTableName = False):
-        table = self.validatePGNameLength(table, modifyName=modifyTableName)
+        table = self.validate_pgtable_name_Length(table, modifyName=modifyTableName)
         logger.info(f'Inserting {len(df):,} records into {table}...')
         if schema:
             logger.info(f'In schema: {schema}')
@@ -847,7 +847,7 @@ class Postgres(object):
         if if_exists not in if_exists_opts:
             logger.error(f'Invalid options for "if_exists": "{if_exists}".\n'
                          f'Must be one of: {if_exists_opts}')
-        table = self.validatePGNameLength(table, modifyTableName=modifyTableName)
+        table = self.validate_pgtable_name_Length(table, modifyTableName=modifyTableName)
         se, te = self.prep_db_for_upload(df=gdf, table=table, schema=schema,
                                          dryrun=dryrun)
 
@@ -1297,7 +1297,7 @@ class Postgres(object):
 
     def rename_table(self, existing_table: str, new_table: str, schema: str, modifyTableName = False):
         
-        new_table = self.validatePGNameLength(new_table, modifyTableName=modifyTableName)
+        new_table = self.validate_pgtable_name_Length(new_table, modifyTableName=modifyTableName)
         logger.info(f'Renaming table: {schema}.{existing_table}')
         rename_statement = sql.SQL(f"ALTER TABLE {schema}.{existing_table} "
                                    f"RENAME TO {new_table}").format(
@@ -1351,7 +1351,7 @@ class Postgres(object):
         return counts_ok
 
 
-    def validatePGNameLength(self, table_name: str, modifyTableName = False):
+    def validate_pgtable_name_Length(self, table_name: str, modifyTableName = False):
         """Preform check on table name length to ensure that it falls
         within PostgreSQL limits of 63 characters.
         modifyName will try to replace "-" and "_" to get name length
