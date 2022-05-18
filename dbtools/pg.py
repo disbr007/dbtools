@@ -599,7 +599,8 @@ class Postgres(object):
                              qualified: bool = False,
                              index: bool = True,
                              dtype: dict = None,
-                             dryrun: bool = False):
+                             dryrun: bool = False,
+                             modifyTableName = False):
         """
         Creates a new, empty table, using pandas/geopandas to infer
         column types.
@@ -621,6 +622,7 @@ class Postgres(object):
         df = df[0:0]
         if qualified:
             schema_name, table_name = table_name.split('.')
+        table_name = self.validate_pgtable_name_Length(table_name, modifyTableName=modifyTableName)
         logger.info(f'Creating table: {table_name}')
         if schema_name:
             logger.info(f'In schema: {schema_name}')
@@ -766,7 +768,7 @@ class Postgres(object):
             indicating whether the schema and/or table exist, e.g.
             (True, False) for schema exists after prep, table does not
         """
-        # Get tables and scehmas to check if the destination already exists
+        # Get tables and schemas to check if the destination already exists
         # Check if schema exists, create if not
         schema_exists = self.schema_exists(schema)
         if not schema_exists:
@@ -789,7 +791,7 @@ class Postgres(object):
             logger.info(f'{schema}.{table} starting count: '
                         f'{starting_table_count}')
         else:
-            logger.info(f'Table {qualified_table} not found, will be created.')
+            logger.info(f'Table {qualified_table} not found.')
             te = False
             # te = self.create_table_like_df(table_name=qualified_table,
             #                                df=df,
@@ -806,7 +808,9 @@ class Postgres(object):
                                sqlalchemy.engine.Connection] = None, 
                     dtype: dict = None,
                     handle_json: bool = True,
-                    dryrun: bool = False,):
+                    dryrun: bool = False,
+                    modifyTableName = False):
+        table = self.validate_pgtable_name_Length(table, modifyName=modifyTableName)
         logger.info(f'Inserting {len(df):,} records into {table}...')
         if schema:
             logger.info(f'In schema: {schema}')
@@ -833,7 +837,8 @@ class Postgres(object):
                     drop_z: bool = False,
                     chunksize=None,
                     pool_size=None, max_overflow=None,
-                    dryrun=False):
+                    dryrun=False,
+                    modifyTableName = False):
         """
         TODO: write docstrings
         """
@@ -842,6 +847,7 @@ class Postgres(object):
         if if_exists not in if_exists_opts:
             logger.error(f'Invalid options for "if_exists": "{if_exists}".\n'
                          f'Must be one of: {if_exists_opts}')
+        table = self.validate_pgtable_name_Length(table, modifyTableName=modifyTableName)
         se, te = self.prep_db_for_upload(df=gdf, table=table, schema=schema,
                                          dryrun=dryrun)
 
@@ -1289,7 +1295,9 @@ class Postgres(object):
         logger.debug(drop_statement.as_string(self.connection))
         self.execute_sql(drop_statement, no_result_expected=True)
 
-    def rename_table(self, existing_table: str, new_table: str, schema: str):
+    def rename_table(self, existing_table: str, new_table: str, schema: str, modifyTableName = False):
+        
+        new_table = self.validate_pgtable_name_Length(new_table, modifyTableName=modifyTableName)
         logger.info(f'Renaming table: {schema}.{existing_table}')
         rename_statement = sql.SQL(f"ALTER TABLE {schema}.{existing_table} "
                                    f"RENAME TO {new_table}").format(
@@ -1302,6 +1310,7 @@ class Postgres(object):
 
     def hotswap_table(self, active_table: str, temp_table: str, schema: str,
                       max_count_diff=0):
+
         logger.info(f'Hotswapping tables: {temp_table}->{active_table}')
         # TODO: ideally some validation happens before the drop
         #       - counts are within expected difference range
@@ -1342,6 +1351,31 @@ class Postgres(object):
         return counts_ok
 
 
+    def validate_pgtable_name_Length(self, table_name: str, modifyTableName = False):
+        """Preform check on table name length to ensure that it falls
+        within PostgreSQL limits of 63 characters.
+        modifyName will try to replace "-" and "_" to get name length
+        within limit."""
+        tn = table_name
+        replacementChars = ["_", "-"]
+
+        wInLimit = True if len(tn) <= 63 else False
+        if not wInLimit and modifyTableName:
+            for ct in replacementChars:
+                tn = tn.replace(ct, "")
+                wInLimit = True if len(tn) <= 63 else False
+                if wInLimit:
+                    break
+                    
+        if not wInLimit:
+            raise ValueError(f"""
+                Table name \n\t{table_name}\nexceeds PostgreSQL limit
+                of 63 and modifyName set to false. Failing
+            """)
+
+        return tn
+
+        
 # TODO:
 #  Create SQLQuery class
 #   - .select .where .fields .join etc.
