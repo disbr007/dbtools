@@ -423,7 +423,7 @@ class Postgres(object):
     def list_schemas(self, include_infoschemas=False):
         """List all schemas in the database"""
         logger.debug('Listing schemas...')
-        schemas_sql = sql.SQL("""SELECT schemaname from pg_catalog.pg_tables""")
+        schemas_sql = sql.SQL("""SELECT nspname FROM pg_catalog.pg_namespace""")
         self.cursor.execute(schemas_sql)
         schemas = self.cursor.fetchall()
         if include_infoschemas:
@@ -854,7 +854,7 @@ class Postgres(object):
 
         # Remove existing values
         if unique_on is not None and te:
-            logger.debug('Removing duplicates based on: {}...'.format(unique_on))
+            logger.info('Removing duplicates based on: {}...'.format(unique_on))
             existing_values = self.get_values(table=table, schema=schema,
                                               columns=unique_on)
             gdf = gdf[~gdf[unique_on].isin(existing_values)]
