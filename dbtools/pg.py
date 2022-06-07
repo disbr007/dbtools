@@ -1374,6 +1374,13 @@ class Postgres(object):
             """)
 
         return tn
+    
+    def validate_geometry(self, table: str, schema: str, geometry_field="geometry"):
+        validate_sql = f"UPDATE {schema}.{table} " \
+                       f"SET {geometry_field} = ST_MakeValid({geometry_field}) " \
+                       f"WHERE ST_IsValid({geometry_field}) = 'f' ; "
+        logger.info(f"Validating geometry for {schema}.{table}")
+        self.execute_sql(sql_query=validate_sql, no_result_expected=True)
 
         
 # TODO:
