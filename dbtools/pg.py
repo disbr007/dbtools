@@ -1382,7 +1382,18 @@ class Postgres(object):
         logger.info(f"Validating geometry for {schema}.{table}")
         self.execute_sql(sql_query=validate_sql, no_result_expected=True)
 
-        
+    def get_geometry_srid(self, table: str, schema: str, geometry_field='geometry'):
+        get_geom_sql = f"SELECT srid FROM public.geometry_columns " \
+                       f"WHERE f_table_schema = '{schema}' " \
+                       f"AND f_table_name = '{table}'"
+        results = self.execute_sql(get_geom_sql)
+        if len(results) == 0:
+            logger.warning(f'Geometry column {geometry_field} for {schema}{table} not found in public.geometry_columns')
+            srid = None
+        else:
+            srid = results[0][0]
+        return srid
+         
 # TODO:
 #  Create SQLQuery class
 #   - .select .where .fields .join etc.
