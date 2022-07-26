@@ -1,6 +1,8 @@
 import setuptools
 import json
 
+import dbtools
+
 with open("readme.md", "r") as fh:
     LONG_DESCRIPTION = fh.read()
 
@@ -10,7 +12,7 @@ with open("requirements.txt", "r") as fh:
 
 setuptools.setup(
     name="dbtools",
-    version='0.1',
+    version=dbtools.__version__,
     author="Jeff Disbrow",
     author_email="disbr007@umn.edu",
     description="Tools for interacting with Postgres databases.",
