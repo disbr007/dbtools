@@ -600,7 +600,7 @@ class Postgres(object):
                              index: bool = True,
                              dtype: dict = None,
                              dryrun: bool = False,
-                             modifyTableName = False):
+                             modifyTableName: bool = False):
         """
         Creates a new, empty table, using pandas/geopandas to infer
         column types.
@@ -724,7 +724,7 @@ class Postgres(object):
 
         return values
 
-    def sql2gdf(self, sql_str, geom_col='geometry', crs=4326,):
+    def sql2gdf(self, sql_str, geom_col='geometry', crs=4326,) -> gpd.GeoDataFrame:
         """Get a GeoDataFrame from a passed SQL query"""
         if isinstance(sql_str, sql.Composed):
             sql_str = sql_str.as_string(self.connection)
@@ -733,7 +733,7 @@ class Postgres(object):
                                             geom_col=geom_col, crs=crs)
         return gdf
 
-    def sql2df(self, sql_str, columns=None, **kwargs):
+    def sql2df(self, sql_str, columns=None, **kwargs) -> pd.DataFrame:
         """Get a DataFrame from a passed SQL query"""
         if isinstance(sql_str, sql.Composed):
             sql_str = sql_str.as_string(self.connection)
@@ -805,12 +805,12 @@ class Postgres(object):
     def df2postgres(self, df: pd.DataFrame, table: str, schema: str = None,
                     if_exists: str = 'fail', index: bool = False,
                     con: Union[sqlalchemy.engine.Engine,
-                               sqlalchemy.engine.Connection] = None, 
+                               sqlalchemy.engine.Connection] = None,
                     dtype: dict = None,
                     handle_json: bool = True,
                     dryrun: bool = False,
-                    modifyTableName = False):
-        table = self.validate_pgtable_name_Length(table, modifyName=modifyTableName)
+                    modifyTableName: bool = False):
+        table = self.validate_pgtable_name_Length(table, modifyTableName=modifyTableName)
         logger.info(f'Inserting {len(df):,} records into {table}...')
         if schema:
             logger.info(f'In schema: {schema}')
@@ -838,7 +838,7 @@ class Postgres(object):
                     chunksize=None,
                     pool_size=None, max_overflow=None,
                     dryrun=False,
-                    modifyTableName = False):
+                    modifyTableName: bool = False):
         """
         TODO: write docstrings
         """
@@ -1295,7 +1295,10 @@ class Postgres(object):
         logger.debug(drop_statement.as_string(self.connection))
         self.execute_sql(drop_statement, no_result_expected=True)
 
-    def rename_table(self, existing_table: str, new_table: str, schema: str, modifyTableName = False):
+    def rename_table(self, existing_table: str,
+                     new_table: str,
+                     schema: str,
+                     modifyTableName: bool = False):
         
         new_table = self.validate_pgtable_name_Length(new_table, modifyTableName=modifyTableName)
         logger.info(f'Renaming table: {schema}.{existing_table}')
@@ -1308,9 +1311,12 @@ class Postgres(object):
         logger.debug(rename_statement.as_string(self.connection))
         self.execute_sql(rename_statement, no_result_expected=True)
 
-    def hotswap_table(self, active_table: str, temp_table: str, schema: str,
-                      max_count_diff=0):
-
+    def hotswap_table(self, active_table: str, 
+                      temp_table: str, 
+                      schema: str,
+                      max_count_diff=0,
+                      old_table_suffix: str = 'outdated',
+                      drop_old: bool = False):
         logger.info(f'Hotswapping tables: {temp_table}->{active_table}')
         # TODO: ideally some validation happens before the drop
         #       - counts are within expected difference range
@@ -1323,14 +1329,19 @@ class Postgres(object):
             if counts_ok is False:
                 logger.warning('Count validation failed, aborting hotswap.')
                 return -1
-        # self.drop_table(table=active_table, schema=schema)
+
         # Rename active to dated table name
-        outdated_table = f'{active_table}_outdated'
+        outdated_table = f'{active_table}_{old_table_suffix}'
         if self.table_exists(table=outdated_table, schema=schema):
             self.drop_table(outdated_table, schema=schema, cascade=True)
         self.rename_table(existing_table=active_table, new_table=outdated_table, schema=schema)
+
         # Rename temp table to active table
         self.rename_table(existing_table=temp_table, new_table=active_table, schema=schema)
+
+        # Drop old table if requested
+        if drop_old:
+            self.drop_table(table=outdated_table, schema=schema)
         # TODO: Ideally more validation, rollback if needed
         return 1
 
