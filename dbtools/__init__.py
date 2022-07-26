@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 
 # ToDo: move this to a version.py?
-__version__ = '1.0.24'
+__version__ = '1.0.26'
 
 logger = logging.getLogger(__name__)
 
