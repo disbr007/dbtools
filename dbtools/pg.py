@@ -6,7 +6,7 @@ import logging
 import re
 from pathlib import Path, PurePath
 import sys
-from typing import Union
+from typing import Union, List, Tuple
 
 import geopandas as gpd
 import pandas as pd
@@ -148,6 +148,17 @@ def ids2sql(ids):
     return str(ids)[1:-1]
 
 
+def columns_to_sql(columns: list) -> sql.SQL:
+    """
+    Convert a list of column names as strings to sql.Identifiers, which 
+    ensures proper quoting.
+    """
+    # TODO: Fix this 't' - find out what needs 't' and add arugment for "qualifier"
+    columns_sql = [sql.Identifier('t', c) for c in columns]
+    columns_sql = sql.SQL(', ').join(columns_sql)
+    return columns_sql
+
+
 def encode_geom_sql(geom_col, encode_geom_col):
     """
     SQL statement to encode geometry column in non-PostGIS Postgres
@@ -263,10 +274,6 @@ def generate_sql(layer, columns=None, where=None, orderby=False, schema=None,
     return query
 
 
-def add2sql(sql_str):
-    pass
-
-
 def intersect_aoi_where(aoi, geom_col):
     """
     Create a where statement for a PostGIS intersection between the
@@ -347,35 +354,7 @@ class Postgres(object):
                 self.connection.close()
         except psycopg2.OperationalError as e:
             logger.error('Error attempt to ensure connection closed.')
-
-    # def __post_init__(self):
-    #     self._determine_connection_profile()
-
-    # def _load_connection_config(self):
-    #     with open(CONFIG_FILE, 'r') as src:
-    #         return ConnectionConfig(connection_profiles=[ConnectionProfile(cp) for cp in 
-    #                                                      yaml.safe_load(src)['connection_profiles']])
-
-    # def _determine_connection_profile(self):
-    #     if self.connection_profile:
-    #         for cp in self.connection_config.connection_profiles:
-    #             if cp.nickname == self._connection_profile:
-    #                 self.connection_profile = cp
-    #     elif any(self.user is None, self.host is None):
-    #         for cp in self.connection_config.connection_profiles:
-    #             if cp.default is True:
-    #                 self.connection_profile = cp
-    #     self.user = self.connection_profile.user
-    #     self.host = self.connection_profile.host
-    #     if self.database not in self.connection_profile.databases:
-    #         logger.error('Database: {self.database} not included in connection profile.')
-
-    # @property
-    # def connection_config(self):
-    #     if self._connection_config is None:
-    #         self._connection_config = self._load_connection_config()
-    #     return self._connection_config
-        
+      
     @property
     def connection(self):
         """Establish connection to database."""
@@ -564,35 +543,6 @@ class Postgres(object):
 
         return schema_name_exists
 
-    # TODO: To make this work, need to add column: type mappings
-    # def create_table(self, table_name, schema_name=None, qualified=False,
-    #                  if_not_exists=True,
-    #                  dryrun=False):
-    #     if qualified:
-    #         schema_name, table_name = table_name.split('.')
-    #     # Create schema if it doesn't exist
-    #     if schema_name not in self.list_schemas():
-    #         self.create_schema(schema_name=schema_name,
-    #                            if_not_exists=if_not_exists)
-    #     # Format CREATE TABLE SQL
-    #     create_table_sql = sql.SQL("CREATE TABLE ")
-    #     if if_not_exists:
-    #         create_table_sql += sql.SQL("IF NOT EXISTS ")
-    #     if schema_name:
-    #         create_table_sql += (sql.SQL(f"{schema_name}.")
-    #                              .format(schema_name=schema_name))
-    #     create_table_sql += sql.SQL(f"{table_name}").format(table_name)
-    #
-    #     logger.info('Creating table:\n{}'
-    #                 .format(create_table_sql.as_string(self.connection)))
-    #     # Execute SQL
-    #     if not dryrun:
-    #         results = self.execute_sql(create_table_sql)
-    #     else:
-    #         logger.info('--dryrun--')
-    #         results = None
-    #     return results
-
     def create_table_like_df(self, table_name: str,
                              df: Union[pd.DataFrame, gpd.GeoDataFrame],
                              schema_name: str = None,
@@ -673,11 +623,19 @@ class Postgres(object):
 
         return count
 
-    def get_table_columns(self, table):
+    def get_table_columns(self, table, schema=None) -> List:
         """Get columns in passed table."""
-        self.cursor.execute(
-            sql.SQL(
-            "SELECT * FROM {} LIMIT 0").format(sql.Identifier(table)))
+        if schema is not None:
+            self.cursor.execute(
+                sql.SQL(
+                    "SELECT * FROM {}.{} LIMIT 0").format(sql.Identifier(schema), sql.Identifier(table))
+                )
+        else:
+            self.cursor.execute(
+                sql.SQL(
+                    "SELECT * FROM {} LIMIT 0").format(sql.Identifier(table))
+                )
+
         columns = [d[0] for d in self.cursor.description]
 
         return columns
@@ -708,6 +666,18 @@ class Postgres(object):
 
         return unique_cols
 
+    def get_non_geo_columns(self, table: str, schema: str, geometry_col: str = 'geometry') -> List:
+        """
+        Get the columns in the source table - they have to be listed 
+        explicitly in order to not select the existing geometry when creating
+        new tables/views with a transformed geometry.
+        """
+        columns = self.get_table_columns(table=table,
+                                        schema=schema)
+        columns = [c for c in columns if c != geometry_col]
+            
+        return columns
+
     def get_values(self, table, columns, schema=None, distinct=False, where=None):
         """Get values in the passed columns(s) in the passed table. If
         distinct, unique values returned (across all columns passed)"""
@@ -724,6 +694,19 @@ class Postgres(object):
 
         return values
 
+    def get_geom_col_type_srid(self, table: str, schema: str) -> Tuple[str, str]:
+        # Get source table geometry column name, srid, and type
+        where = (f"f_table_name = '{table}' AND "
+                f"f_table_schema = '{schema}'")
+        values = self.get_values(table='geometry_columns',
+                                    schema='public',
+                                    columns=['f_geometry_column', 'srid', 'type'],
+                                    where=where)
+        geometry_col = values[0][0]
+        srid = values[0][1]
+        geom_type = values[0][2]
+        return geometry_col, geom_type, srid
+    
     def sql2gdf(self, sql_str, geom_col='geometry', crs=4326,) -> gpd.GeoDataFrame:
         """Get a GeoDataFrame from a passed SQL query"""
         if isinstance(sql_str, sql.Composed):
@@ -1260,8 +1243,14 @@ class Postgres(object):
                                 where=owner_where)
         return owner
         
-    def alter_table_owner(self, table: str, schema: str, new_owner: str):
-        alter_table_sql = f"ALTER TABLE {schema}.{table} " \
+    def alter_table_owner(self, table: str, schema: str, new_owner: str, table_type: str = 'TABLE'):
+        # Validate inputs
+        valid_table_types = ['table', 'view', 'materialized view']
+        if table_type.lower() not in valid_table_types:
+            logger.error(f'Invalid table type specified for RENAME: {table_type}, '
+                         f'Must be one of: {valid_table_types}.')
+        
+        alter_table_sql = f"ALTER {table_type} {schema}.{table} " \
                           f"OWNER TO {new_owner}"
         logger.info(f"Updating {schema}.{table} owner to: {new_owner}")
         self.execute_sql(sql_query=alter_table_sql, no_result_expected=True)
@@ -1280,9 +1269,11 @@ class Postgres(object):
         logger.debug(refresh_statement.as_string(self.connection))
         self.execute_sql(refresh_statement, no_result_expected=True)
 
-    def drop_table(self, table: str, schema: str, if_exists: bool = True, cascade: bool = False):
-        logger.info(f"Dropping table: {schema}.{table}")
-        drop_statement = "DROP TABLE"
+    def drop_table(self, table: str, schema: str, 
+                   table_type: str = 'TABLE',
+                   if_exists: bool = True, cascade: bool = False):
+        logger.info(f"Dropping {table_type}: {schema}.{table}")
+        drop_statement = f"DROP {table_type}"
         if if_exists:
             drop_statement += " IF EXISTS"
             
@@ -1298,12 +1289,17 @@ class Postgres(object):
     def rename_table(self, existing_table: str,
                      new_table: str,
                      schema: str,
-                     modifyTableName: bool = False):
-        
+                     modifyTableName: bool = False,
+                     table_type: str = 'TABLE'):
+        valid_table_types = ['table', 'view', 'materialized view']
+        if table_type.lower() not in valid_table_types:
+            logger.error(f'Invalid table type specified for RENAME: {table_type}, '
+                         f'Must be one of: {valid_table_types}.')
         new_table = self.validate_pgtable_name_Length(new_table, modifyTableName=modifyTableName)
         logger.info(f'Renaming table: {schema}.{existing_table}')
-        rename_statement = sql.SQL(f"ALTER TABLE {schema}.{existing_table} "
+        rename_statement = sql.SQL(f"ALTER {table_type} {schema}.{existing_table} "
                                    f"RENAME TO {new_table}").format(
+                                       table_type=sql.Literal(table_type),
                                        schema=sql.Identifier(schema),
                                        existing_table=sql.Identifier(existing_table),
                                        new_table=sql.Identifier(new_table)
