@@ -137,4 +137,4 @@ clarie_repos
 *.ini
 
 # DB connections
-config.json
+dbtools-config.yml

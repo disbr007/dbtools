@@ -3,38 +3,18 @@ Tools for interacting with databases, specifically tested for
 PostgreSQL and PostgreSQL/PostGIS databases.
 
 ### Set Up
-Create a copy of the `example_config.json` file and rename it to
-`config.json`. Replace the `global_user` and `global_password` 
-values with your own. Additional databases can be added following 
-the same format. Database specific users and passwords can be 
-specified within a given host's config, for example:
-```json
-{
-  "hosts":
-  {
-    "danco": {
-      "host": "danco.pgc.umn.edu",
-      "databases": [
-        "footprint",
-        "imagery"
-      ]
-    },
-    "sandwich": {
-      "host": "sandwich-pool.pgc.umn.edu",
-      "databases": [
-        "planet",
-        "dem",
-        "dgarchive"
-      ],
-      "user": "user",
-      "password": "password",
-      "sslmode": "require"
-    }
-  },
-  "global_user": "disbr007",
-  "global_password": "******"
-}
+Postgres configurations are read from standard locations: `~/.pgpass` and
+`PG*` environmental variables, with environmental variables overriding any
+values specfied in `~/.pgpass`. To specify defaults, a `.env` file can be
+created at the root of the project and any values specified there will 
+take precedence. For example:
 ```
+PGHOST: localhost
+PGPORT: 5432
+PGDATABASE: my_database
+PGUSER: me
+```
+
 
 ### Usage
 Basic usage:
@@ -63,16 +43,19 @@ with Postgres([host_name], [database_name]) as db_src:
     gdf = db_src.sql2gdf(sql_str)
 ```
 
-## Versioning
-1. Manually bump version in `dbtools/dbtools/__init__.py`
-2. Add a new git tag. GH Actions will automatically create a release when a version tag is pushed.
-```
-git tag v[version]
-git push origin --tags
-```
+# Release process
+Currently the release process is relatively manual. 
+1. Identify most recent tag:  
+`git tag`
+2. Update `aoetl.__init__` with the new version.
+3. Push changes to `main`
+4. Create new tag with appropriate bump in patch, minor, or major number, matching `dbtools.__init__`:  
+`git tag v0.1.2`
+5. Push tag to GitHub:  
+`git push origin v0.1.2`
+6. GitHub Actions will create a release from any push of a version tag: [release.yml](.github/workflows/release.yml)
+
 
 _TODO: read version from `__init__.py` automatically_
 <!--- TODO
-- read hosts/dbs/username/passwords directly from .pgpass
--use .ini connection files, e.g. https://www.postgresql.org/docs/9.1/libpq-pgservice.html
 ---> 
