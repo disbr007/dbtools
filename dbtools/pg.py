@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Union, List, Tuple
 
+from dotenv import load_dotenv
 import geopandas as gpd
 import pandas as pd
 import psycopg2
@@ -20,6 +21,7 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
+load_dotenv()
 
 # Supress pandas SettingWithCopyWarning
 pd.set_option('mode.chained_assignment', None)
