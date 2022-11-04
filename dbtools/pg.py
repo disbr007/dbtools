@@ -4,39 +4,26 @@ import decimal
 import json
 import logging
 import re
-from pathlib import Path, PurePath
-import sys
-from typing import Union
+import os
+from pathlib import Path
+from typing import Union, List, Tuple
 
 import geopandas as gpd
 import pandas as pd
 import psycopg2
 from psycopg2 import sql
-from pydantic import BaseModel
 import shapely
 from sqlalchemy import create_engine
 import sqlalchemy
 from tqdm import tqdm
-from typing import List
-import yaml
 
-from dbtools import CONFIG_FILE
 
 logger = logging.getLogger(__name__)
-# logger.addHandler(logging.NullHandler)
+
 
 # Supress pandas SettingWithCopyWarning
 pd.set_option('mode.chained_assignment', None)
 
-# Config keys
-HOSTS = 'hosts'
-DATABASES = 'databases'
-GLOBAL_USER = 'global_user'
-GLOBAL_PASSWORD = 'global_password'
-HOST = 'host'
-USER = 'user'
-PASSWORD = 'password'
-DATABASE = 'database'
 
 # Constants
 DEF_SKIP_SCHEMAS = ['information_schema',
@@ -44,70 +31,60 @@ DEF_SKIP_SCHEMAS = ['information_schema',
 FAIL = 'fail'
 
 
-
-class ConnectionProfile(BaseModel):
-    nickname: str
-    default: bool = False
+@dataclass
+class PGConfig:
     host: str
-    port: int
-    databases: List[str]
+    port: str
+    database: str
     user: str
+    password: str
+
+    def __post_init__(self):
+        self.non_wildcard_atts = {att: value for att, value in self.__dict__.items()
+                                  if value != '*'}
 
 
-class ConnectionConfig(BaseModel):
-    connection_profiles: List[ConnectionProfile]
-
-
-def get_db_config(host_name, db_name, config_file=CONFIG_FILE) -> dict:
-    # TODO: validate config entries
-    # TODO: convert to use .pgpass
-    if not isinstance(config_file, PurePath):
-        config_file = Path(config_file)
-    if not config_file.exists():
-        logger.error('Config file not found at: {}'.format(config_file))
-        logger.error('Please create a config.json file based on the example.')
-        raise FileNotFoundError
-
+def load_pgconfig(host: str = None):
+    pghost = os.environ.get('PGHOST', host)
+    if pghost is None:
+        logger.error('Must provided PGHOST, either as argument or via PGHOST environmental '
+                     'variable.')
+        raise Exception('No PGHOST specified.')
+    pgport = os.environ.get('PGPORT')
+    pgdatabase = os.environ.get('PGDATABASE')
+    pguser = os.environ.get('PGUSER')
+    pgpassword = os.environ.get('PGPASSWORD')
+    pgpassfile = os.environ.get('PGPASSFILE', Path.home() / '.pgpass')
     try:
-        config = json.load(open(config_file))
-    except json.decoder.JSONDecodeError as e:
-        logger.error('Error loading config file: {}'.format(config_file))
-        logger.error(e)
-        sys.exit(-1)
+        with open(pgpassfile, 'r') as src:
+            connection_configs = [cc.strip().split(':') for cc in src.readlines()]
+    except FileNotFoundError:
+        logger.debug('pgpass file not found, reading from environmental variables.')
+        connection_configs = []
+    if len(connection_configs) == 0:
+        # Use environmental variables
+        pgconfig = PGConfig(
+            host=pghost,
+            port=pgport,
+            database=pgdatabase,
+            user=pguser,
+            password=pgpassword
+        )
+    else:
+        configs = {host: PGConfig(
+            host=host if pghost is None else pghost,
+            port=port if pgport is None else pgport,
+            database=database if pgdatabase is None else pgdatabase,
+            user=user if pguser is None else pguser,
+            password=password if pgpassword is None else pgpassword
+               )
+            for host, port, database, user, password in connection_configs
+        }
+        pgconfig = configs.get(pghost)
         
+    return pgconfig
 
-    # Locate host
-    host_short_names = config[HOSTS].keys()
-    host_full_names = [k[1][HOST] for k in config[HOSTS].items()]
-    if host_name in host_short_names:
-        db_config = config[HOSTS][host_name]
-    elif host_name in host_full_names:
-        for short_name, params in config[HOSTS].items():
-            if host_name == params[HOST]:
-                db_config = params
-                break
-    else:
-        logger.error('Config for host "{}" not found.'.format(host_name))
-        raise KeyError
-
-    # Confirm database is listed in host's config
-    databases = db_config.pop(DATABASES)
-    if db_name in databases:
-        db_config[DATABASE] = db_name
-    else:
-        logger.error('Database "{}" not listed in {} config.'.format(db_name,
-                                                                     host_name))
-        raise ConnectionError
-
-    # Add username and password
-    if USER not in db_config.keys():
-        db_config[USER] = config[GLOBAL_USER]
-    if PASSWORD not in db_config.keys():
-        db_config[PASSWORD] = config[GLOBAL_PASSWORD]
-
-    return db_config
-
-
+    
 def get_geometry_cols(gdf):
     """Gets all columns in a geodataframe that are of type geometry.
     Parameters
@@ -146,6 +123,17 @@ def check_where(where, join='AND'):
 
 def ids2sql(ids):
     return str(ids)[1:-1]
+
+
+def columns_to_sql(columns: list) -> sql.SQL:
+    """
+    Convert a list of column names as strings to sql.Identifiers, which 
+    ensures proper quoting.
+    """
+    # TODO: Fix this 't' - find out what needs 't' and add arugment for "qualifier"
+    columns_sql = [sql.Identifier('t', c) for c in columns]
+    columns_sql = sql.SQL(', ').join(columns_sql)
+    return columns_sql
 
 
 def encode_geom_sql(geom_col, encode_geom_col):
@@ -263,10 +251,6 @@ def generate_sql(layer, columns=None, where=None, orderby=False, schema=None,
     return query
 
 
-def add2sql(sql_str):
-    pass
-
-
 def intersect_aoi_where(aoi, geom_col):
     """
     Create a where statement for a PostGIS intersection between the
@@ -302,12 +286,19 @@ class Postgres(object):
     """
     _instance = None
 
-    def __init__(self, database: str, host: str = None, user: str = None, 
+    def __init__(self,
+                 host: str = None,
+                 port: str = 5432,
+                 database: str = None,
+                 user: str = None,
+                 password: str = None,
                  connection_profile: str = None):
-        self.database = database
-        # self.db_config = get_db_config(host, database)
-        self.user = user
         self.host = host
+        self.port = port
+        self.database = database
+        self.user = user
+        self.password = password
+
         self.connection_profile = connection_profile
         self._connection_config = None
         self._connection = None
@@ -347,35 +338,7 @@ class Postgres(object):
                 self.connection.close()
         except psycopg2.OperationalError as e:
             logger.error('Error attempt to ensure connection closed.')
-
-    # def __post_init__(self):
-    #     self._determine_connection_profile()
-
-    # def _load_connection_config(self):
-    #     with open(CONFIG_FILE, 'r') as src:
-    #         return ConnectionConfig(connection_profiles=[ConnectionProfile(cp) for cp in 
-    #                                                      yaml.safe_load(src)['connection_profiles']])
-
-    # def _determine_connection_profile(self):
-    #     if self.connection_profile:
-    #         for cp in self.connection_config.connection_profiles:
-    #             if cp.nickname == self._connection_profile:
-    #                 self.connection_profile = cp
-    #     elif any(self.user is None, self.host is None):
-    #         for cp in self.connection_config.connection_profiles:
-    #             if cp.default is True:
-    #                 self.connection_profile = cp
-    #     self.user = self.connection_profile.user
-    #     self.host = self.connection_profile.host
-    #     if self.database not in self.connection_profile.databases:
-    #         logger.error('Database: {self.database} not included in connection profile.')
-
-    # @property
-    # def connection_config(self):
-    #     if self._connection_config is None:
-    #         self._connection_config = self._load_connection_config()
-    #     return self._connection_config
-        
+      
     @property
     def connection(self):
         """Establish connection to database."""
@@ -385,6 +348,8 @@ class Postgres(object):
                 self._connection = psycopg2.connect(host=self.host,
                                                     database=self.database,
                                                     user=self.user,
+                                                    password=self.password,
+                                                    port=self.port,
                     # **self.db_config,
                     )
             except (psycopg2.Error, psycopg2.OperationalError) as error:
@@ -437,7 +402,10 @@ class Postgres(object):
         logger.debug(f'Schema count: {len(schemas)}')
         return schemas
 
-    def list_tables(self, schemas=None, skip_schemas=DEF_SKIP_SCHEMAS):
+    def list_tables(self,
+                    schemas=None,
+                    qualified: bool = True,
+                    skip_schemas=DEF_SKIP_SCHEMAS):
         """List all tables in the database."""
         logger.debug('Listing tables...')
         tables_sql = sql.SQL("SELECT schemaname, tablename "
@@ -449,41 +417,65 @@ class Postgres(object):
             tables_sql = tables_sql + sql.SQL(f" WHERE schemaname IN ({schemas_str})")
         self.cursor.execute(tables_sql)
         schemas_tables = self.cursor.fetchall()
+        if qualified:
+            schemas_tables = ['{}.{}'.format(s, t) for s, t in schemas_tables
+                              if s not in skip_schemas]
+        else:
+            schemas_tables = [t for s, t in schemas_tables]
+        logger.debug(f'Table count: {len(schemas_tables)}')
 
-        qualified_tables = ['{}.{}'.format(s, t) for s, t in schemas_tables
-                            if s not in skip_schemas]
-        logger.debug(f'Table count: {len(qualified_tables)}')
+        return schemas_tables
 
-        return qualified_tables
-
-    def list_views(self, skip_schemas=DEF_SKIP_SCHEMAS):
+    def list_views(self,
+                   schemas: list = None,
+                   qualified: bool = True,
+                   skip_schemas=DEF_SKIP_SCHEMAS):
         logger.debug('Listing views...')
         views_sql = sql.SQL("""SELECT schemaname, viewname
                                FROM pg_catalog.pg_views""")
+        if schemas:
+            if not isinstance(schemas, list):
+                schemas = [schemas]
+            schemas_str = str(schemas)[1:-1]
+            views_sql = views_sql + sql.SQL(f" WHERE schemaname IN ({schemas_str})")
         self.cursor.execute(views_sql)
         schemas_views = self.cursor.fetchall()
-        qualified_views = ['{}.{}'.format(s, t) for s, t in schemas_views
-                           if s not in skip_schemas]
-        logger.debug('Views: {}'.format(qualified_views))
+        if qualified:
+            schemas_views = ['{}.{}'.format(s, t) for s, t in schemas_views
+                             if s not in skip_schemas]
+        else:
+            schemas_views = [t for t in schemas_views]
+        logger.debug('Views: {}'.format(schemas_views))
 
-        return qualified_views
+        return schemas_views
 
-    def list_matviews(self, skip_schemas=DEF_SKIP_SCHEMAS):
+    def list_matviews(self,
+                      schemas: list = None,
+                      qualified: bool = True,
+                      skip_schemas=DEF_SKIP_SCHEMAS):
         logger.debug('Listing Materialized Views...')
         matviews_sql = sql.SQL("""SELECT schemaname, matviewname
                                   FROM pg_catalog.pg_matviews""")
+        if schemas:
+            if not isinstance(schemas, list):
+                schemas = [schemas]
+            schemas_str = str(schemas)[1:-1]
+            matviews_sql = matviews_sql + sql.SQL(f" WHERE schemaname IN ({schemas_str})")
         self.cursor.execute(matviews_sql)
         schemas_matviews = self.cursor.fetchall()
-        qualified_matviews = ['{}.{}'.format(s, t) for s, t in schemas_matviews
-                              if s not in skip_schemas]
-        logger.debug('Materialized Views: {}'.format(qualified_matviews))
+        if qualified:
+            schemas_matviews = ['{}.{}'.format(s, t) for s, t in schemas_matviews
+                                if s not in skip_schemas]
+        else:
+            schemas_matviews = [t for s, t in schemas_matviews]
+        logger.debug('Materialized Views: {}'.format(schemas_matviews))
 
-        return qualified_matviews
+        return schemas_matviews
 
-    def list_db_all(self):
-        tables = self.list_tables()
-        views = self.list_views()
-        matviews = self.list_matviews()
+    def list_db_all(self, schemas: Union[str, list], qualified: bool = True):
+        tables = self.list_tables(schemas=schemas, qualified=qualified)
+        views = self.list_views(schemas=schemas, qualified=qualified)
+        matviews = self.list_matviews(schemas=schemas, qualified=qualified)
 
         all_layers = tables + views + matviews
 
@@ -537,6 +529,18 @@ class Postgres(object):
         schema_tables = self.list_tables(schemas=schema)
         return table in schema_tables
 
+    def view_exists(self, view: str, schema: str = None, qualified: bool = True):
+        if not qualified or schema is not None:
+            view = f'{schema}.{view}'
+        schema_matviews = self.list_matviews(schemas=schema)
+        schema_views = self.list_views(schemas=schema)
+        all_views = schema_matviews + schema_views
+        return view in all_views
+
+    def table_or_view_exists(self, database_object: str, schema: str = None) -> bool:
+        qualified_database_object = f'{schema}.{database_object}'
+        return qualified_database_object in self.list_db_all()
+    
     def create_schema(self, schema_name, if_not_exists=True, dryrun=False)\
             -> bool:
         """Creates a new schema of [schema_name]"""
@@ -563,35 +567,6 @@ class Postgres(object):
             schema_name_exists = self.schema_exists(schema_name)
 
         return schema_name_exists
-
-    # TODO: To make this work, need to add column: type mappings
-    # def create_table(self, table_name, schema_name=None, qualified=False,
-    #                  if_not_exists=True,
-    #                  dryrun=False):
-    #     if qualified:
-    #         schema_name, table_name = table_name.split('.')
-    #     # Create schema if it doesn't exist
-    #     if schema_name not in self.list_schemas():
-    #         self.create_schema(schema_name=schema_name,
-    #                            if_not_exists=if_not_exists)
-    #     # Format CREATE TABLE SQL
-    #     create_table_sql = sql.SQL("CREATE TABLE ")
-    #     if if_not_exists:
-    #         create_table_sql += sql.SQL("IF NOT EXISTS ")
-    #     if schema_name:
-    #         create_table_sql += (sql.SQL(f"{schema_name}.")
-    #                              .format(schema_name=schema_name))
-    #     create_table_sql += sql.SQL(f"{table_name}").format(table_name)
-    #
-    #     logger.info('Creating table:\n{}'
-    #                 .format(create_table_sql.as_string(self.connection)))
-    #     # Execute SQL
-    #     if not dryrun:
-    #         results = self.execute_sql(create_table_sql)
-    #     else:
-    #         logger.info('--dryrun--')
-    #         results = None
-    #     return results
 
     def create_table_like_df(self, table_name: str,
                              df: Union[pd.DataFrame, gpd.GeoDataFrame],
@@ -673,11 +648,19 @@ class Postgres(object):
 
         return count
 
-    def get_table_columns(self, table):
+    def get_table_columns(self, table, schema=None) -> List:
         """Get columns in passed table."""
-        self.cursor.execute(
-            sql.SQL(
-            "SELECT * FROM {} LIMIT 0").format(sql.Identifier(table)))
+        if schema is not None:
+            self.cursor.execute(
+                sql.SQL(
+                    "SELECT * FROM {}.{} LIMIT 0").format(sql.Identifier(schema), sql.Identifier(table))
+                )
+        else:
+            self.cursor.execute(
+                sql.SQL(
+                    "SELECT * FROM {} LIMIT 0").format(sql.Identifier(table))
+                )
+
         columns = [d[0] for d in self.cursor.description]
 
         return columns
@@ -708,6 +691,18 @@ class Postgres(object):
 
         return unique_cols
 
+    def get_non_geo_columns(self, table: str, schema: str, geometry_col: str = 'geometry') -> List:
+        """
+        Get the columns in the source table - they have to be listed 
+        explicitly in order to not select the existing geometry when creating
+        new tables/views with a transformed geometry.
+        """
+        columns = self.get_table_columns(table=table,
+                                         schema=schema)
+        columns = [c for c in columns if c != geometry_col]
+            
+        return columns
+
     def get_values(self, table, columns, schema=None, distinct=False, where=None):
         """Get values in the passed columns(s) in the passed table. If
         distinct, unique values returned (across all columns passed)"""
@@ -724,8 +719,25 @@ class Postgres(object):
 
         return values
 
-    def sql2gdf(self, sql_str, geom_col='geometry', crs=4326,) -> gpd.GeoDataFrame:
+    def get_geom_col_type_srid(self, table: str, schema: str) -> Tuple[str, str]:
+        # Get source table geometry column name, srid, and type
+        where = (f"f_table_name = '{table}' AND "
+                f"f_table_schema = '{schema}'")
+        values = self.get_values(table='geometry_columns',
+                                 schema='public',
+                                 columns=['f_geometry_column', 'srid', 'type'],
+                                 where=where)
+        geometry_col = values[0][0]
+        srid = values[0][1]
+        geom_type = values[0][2]
+        return geometry_col, geom_type, srid
+
+    def sql2gdf(self, sql_str, geom_col='geometry', crs: Union[str, int] = None) -> gpd.GeoDataFrame:
         """Get a GeoDataFrame from a passed SQL query"""
+        if crs is None:
+            # Old default, behavior, not ideal
+            logger.warning('No CRS passed, defaulting to EPSG:4326')
+            crs = 4326
         if isinstance(sql_str, sql.Composed):
             sql_str = sql_str.as_string(self.connection)
         gdf = gpd.GeoDataFrame.from_postgis(sql=sql_str,
@@ -742,6 +754,23 @@ class Postgres(object):
 
         df = pd.read_sql(sql=sql_str, con=self.get_engine().connect(),
                          columns=columns, **kwargs)
+
+        return df
+
+    def table2df(self, table: str, schema: str = None, where: str = None, gdf: bool = False):
+        sql_str = sql.SQL('SELECT * FROM {schema}.{table}').format(
+            schema=sql.Identifier(schema),
+            table=sql.Identifier(table),
+        )
+        if where:
+            sql_str += sql.SQL(' WHERE {where}').format(where=where)
+
+        if gdf:
+            geom_col, _geom_type, srid = self.get_geom_col_type_srid(table=table,
+                                                                     schema=schema)
+            df = self.sql2gdf(sql_str=sql_str, geom_col=geom_col, crs=srid)
+        else:
+            df = self.sql2df(sql_str=sql_str)
 
         return df
 
@@ -1260,8 +1289,14 @@ class Postgres(object):
                                 where=owner_where)
         return owner
         
-    def alter_table_owner(self, table: str, schema: str, new_owner: str):
-        alter_table_sql = f"ALTER TABLE {schema}.{table} " \
+    def alter_table_owner(self, table: str, schema: str, new_owner: str, table_type: str = 'TABLE'):
+        # Validate inputs
+        valid_table_types = ['table', 'view', 'materialized view']
+        if table_type.lower() not in valid_table_types:
+            logger.error(f'Invalid table type specified for RENAME: {table_type}, '
+                         f'Must be one of: {valid_table_types}.')
+        
+        alter_table_sql = f"ALTER {table_type} {schema}.{table} " \
                           f"OWNER TO {new_owner}"
         logger.info(f"Updating {schema}.{table} owner to: {new_owner}")
         self.execute_sql(sql_query=alter_table_sql, no_result_expected=True)
@@ -1280,9 +1315,11 @@ class Postgres(object):
         logger.debug(refresh_statement.as_string(self.connection))
         self.execute_sql(refresh_statement, no_result_expected=True)
 
-    def drop_table(self, table: str, schema: str, if_exists: bool = True, cascade: bool = False):
-        logger.info(f"Dropping table: {schema}.{table}")
-        drop_statement = "DROP TABLE"
+    def drop_table(self, table: str, schema: str, 
+                   table_type: str = 'TABLE',
+                   if_exists: bool = True, cascade: bool = False):
+        logger.info(f"Dropping {table_type}: {schema}.{table}")
+        drop_statement = f"DROP {table_type}"
         if if_exists:
             drop_statement += " IF EXISTS"
             
@@ -1298,12 +1335,17 @@ class Postgres(object):
     def rename_table(self, existing_table: str,
                      new_table: str,
                      schema: str,
-                     modifyTableName: bool = False):
-        
+                     modifyTableName: bool = False,
+                     table_type: str = 'TABLE'):
+        valid_table_types = ['table', 'view', 'materialized view']
+        if table_type.lower() not in valid_table_types:
+            logger.error(f'Invalid table type specified for RENAME: {table_type}, '
+                         f'Must be one of: {valid_table_types}.')
         new_table = self.validate_pgtable_name_Length(new_table, modifyTableName=modifyTableName)
         logger.info(f'Renaming table: {schema}.{existing_table}')
-        rename_statement = sql.SQL(f"ALTER TABLE {schema}.{existing_table} "
+        rename_statement = sql.SQL(f"ALTER {table_type} {schema}.{existing_table} "
                                    f"RENAME TO {new_table}").format(
+                                       table_type=sql.Literal(table_type),
                                        schema=sql.Identifier(schema),
                                        existing_table=sql.Identifier(existing_table),
                                        new_table=sql.Identifier(new_table)
@@ -1362,7 +1404,7 @@ class Postgres(object):
         return counts_ok
 
 
-    def validate_pgtable_name_Length(self, table_name: str, modifyTableName = False):
+    def validate_pgtable_name_Length(self, table_name: str, modifyTableName: bool = False): 
         """Preform check on table name length to ensure that it falls
         within PostgreSQL limits of 63 characters.
         modifyName will try to replace "-" and "_" to get name length

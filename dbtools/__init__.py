@@ -1,13 +1,5 @@
-import logging 
-from pathlib import Path
+from dotenv import load_dotenv
 
-# ToDo: move this to a version.py?
-__version__ = '1.0.24'
+__version__ = '1.0.27'
 
-logger = logging.getLogger(__name__)
-
-# TODO: Improve how this is located (users home, here, environmental variable, etc.)
-CONFIG_FILE = Path(__file__).parent / "dbtools-config.yml"
-# if not CONFIG_FILE.exists():
-    # logger.error('config.json not found. Should be created at: '
-                #  '{}'.format(CONFIG_FILE))
+load_dotenv()
