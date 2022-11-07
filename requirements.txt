@@ -15,3 +15,4 @@ setuptools
 shapely
 sqlalchemy
 urllib3
+python-dotenv
