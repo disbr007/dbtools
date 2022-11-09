@@ -13,6 +13,8 @@ import geopandas as gpd
 import pandas as pd
 import psycopg2
 from psycopg2 import sql
+from pyproj import CRS
+from pyproj.exceptions import CRSError
 import shapely
 from sqlalchemy import create_engine
 import sqlalchemy
@@ -86,7 +88,7 @@ def load_pgconfig(host: str = None):
         
     return pgconfig
 
-    
+
 def get_geometry_cols(gdf):
     """Gets all columns in a geodataframe that are of type geometry.
     Parameters
@@ -340,7 +342,7 @@ class Postgres(object):
                 self.connection.close()
         except psycopg2.OperationalError as e:
             logger.error('Error attempt to ensure connection closed.')
-      
+
     @property
     def connection(self):
         """Establish connection to database."""
@@ -542,7 +544,7 @@ class Postgres(object):
     def table_or_view_exists(self, database_object: str, schema: str = None) -> bool:
         qualified_database_object = f'{schema}.{database_object}'
         return qualified_database_object in self.list_db_all()
-    
+
     def create_schema(self, schema_name, if_not_exists=True, dryrun=False)\
             -> bool:
         """Creates a new schema of [schema_name]"""
@@ -1238,7 +1240,7 @@ class Postgres(object):
         else:
             geometry_type = results[0][0]
         return geometry_type
-    
+
     # def get_shapely_geom_type(self, table: str, schema: str):
         # TODO: look-up table for POSTGIS to shapely geom type
     #     get_one_sql = f"SELECT * FROM '{schema}.{table} LIMIT 1"
@@ -1290,7 +1292,7 @@ class Postgres(object):
         owner = self.get_values(table='pg_tables', schema='pg_catalog', columns='tableowner',
                                 where=owner_where)
         return owner
-        
+
     def alter_table_owner(self, table: str, schema: str, new_owner: str, table_type: str = 'TABLE'):
         # Validate inputs
         valid_table_types = ['table', 'view', 'materialized view']
@@ -1302,7 +1304,7 @@ class Postgres(object):
                           f"OWNER TO {new_owner}"
         logger.info(f"Updating {schema}.{table} owner to: {new_owner}")
         self.execute_sql(sql_query=alter_table_sql, no_result_expected=True)
-        
+
     def alter_schema_owner(self, schema: str, new_owner: str):
         alter_schema_sql = f"ALTER SCHEMA {schema} " \
                            f"OWNER TO {new_owner}"  
@@ -1405,7 +1407,6 @@ class Postgres(object):
                            f'{t1_count - t2_count} <= {max_diff} = False')
         return counts_ok
 
-
     def validate_pgtable_name_Length(self, table_name: str, modifyTableName: bool = False): 
         """Preform check on table name length to ensure that it falls
         within PostgreSQL limits of 63 characters.
@@ -1429,7 +1430,7 @@ class Postgres(object):
             """)
 
         return tn
-    
+
     def validate_geometry(self, table: str, schema: str, geometry_field="geometry"):
         validate_sql = f"UPDATE {schema}.{table} " \
                        f"SET {geometry_field} = ST_MakeValid({geometry_field}) " \
@@ -1448,7 +1449,79 @@ class Postgres(object):
         else:
             srid = results[0][0]
         return srid
-         
+
+    def simplify_table(self, table: str, source_schema: str, simplify_tolerances: List[float], 
+                       dest_schema: str = None, dryrun: bool = False) -> List[str]:
+        """
+        Creates materialized views that are simplified versions of the source table. For each
+        tolerance provided, one materialized view will be created. Tolerances are in units of
+        [table].
+        """
+        if dest_schema is None:
+            dest_schema = source_schema
+
+        # Ensure table to work on exists
+        te = self.table_exists(table=table, schema=source_schema, qualified=False)
+        if te is False:
+            logger.error(f'Source table does not exist: {source_schema}.{table}')
+            raise Exception
+
+        # Get columns
+        source_cols = self.get_table_columns(table=table, schema=source_schema)
+        geometry_col, _geom_type, srid = self.get_geom_col_type_srid(table=table,
+                                                                     schema=source_schema)
+        non_geo_cols = [sql.Identifier(col) for col in source_cols if col != geometry_col]
+
+        # Log CRS info - warning if not projected
+        try:
+            crs = CRS(f'EPSG:{srid}')        
+            logger.info(f'Simplify tolerance is in units of source table: '
+                        f'{crs.axis_info[0].unit_name}')
+            if not crs.is_projected:
+                logger.warning('Source table is not projected. Simplify tolerances will be in '
+                               'degrees.')
+        except CRSError as e:
+            logger.error(f'Error determining CRS for source table: {source_schema}.{table}: {e}')
+
+        simplified_matviews = []
+        for simp_tol in simplify_tolerances:
+            if simp_tol.is_integer():
+                simp_tol = round(simp_tol)
+            logger.info(f'Simplifying {source_schema}.{table} - Tolerance: {simp_tol}')
+            # Create name of new matview
+            simplified_matview_name = f'{table}_simplify{simp_tol}'.replace('.', 'x')
+            # Determine if matview exists
+            ve = self.view_exists(view=simplified_matview_name, schema=dest_schema,
+                                  qualified=False)
+            if ve is True:
+                logger.warning(f'View exists with destination name, skipping: '
+                               f'{dest_schema}.{simplified_matview_name}')
+                continue
+            # Create SQL to simplify
+            simplify_sql = sql.SQL(
+                "CREATE MATERIALIZED VIEW {dest_schema}.{simplified_matview} AS "
+                "SELECT {non_geo_cols}, "
+                "ST_SimplifyPreserveTopology({geometry_col}, {simp_tol}) as geometry "
+                "FROM {source_schema}.{source_table};").format(
+                    dest_schema=sql.Identifier(dest_schema),
+                    simplified_matview=sql.Identifier(simplified_matview_name),
+                    non_geo_cols=sql.SQL(',').join(non_geo_cols),
+                    geometry_col=sql.Identifier(geometry_col),
+                    simp_tol=sql.Literal(simp_tol),
+                    source_schema=sql.Identifier(source_schema),
+                    source_table=sql.Identifier(table)
+                )
+            logger.debug(simplify_sql.as_string(self.connection))
+            if dryrun is False:
+                # Execute SQL
+                self.execute_sql(simplify_sql, no_result_expected=True)
+            simplified_matviews.append(simplified_matview_name)
+        matviews_log = "\n".join(simplified_matviews)
+        logger.info(f'Created {len(simplified_matviews)} simplified materialized views:\n'
+                    f'{matviews_log}')
+        return simplified_matviews
+
+
 # TODO:
 #  Create SQLQuery class
 #   - .select .where .fields .join etc.
