@@ -1229,12 +1229,12 @@ class Postgres(object):
         return successful_df, failed_df
 
     def get_geometry_type(self, table: str, schema: str = None):
-        get_geom_sql = f"SELECT type FROM public.geometry_columns " \
+        select_geom_cols_sql = f"SELECT type FROM public.geometry_columns " \
                        f"WHERE f_table_schema = '{schema}' " \
                        f"AND f_table_name = '{table}'"
-        results = self.execute_sql(get_geom_sql)
+        results = self.execute_sql(select_geom_cols_sql)
         if len(results) == 0:
-            logger.warning(f'Geometry column for {schema}{table} not found in public.geometry_columns - likely '
+            logger.warning(f'Geometry column for {schema}.{table} not found in public.geometry_columns - likely '
                            'table does not have geometry.')
             geometry_type = None
         else:
@@ -1439,19 +1439,34 @@ class Postgres(object):
         self.execute_sql(sql_query=validate_sql, no_result_expected=True)
 
     def get_geometry_srid(self, table: str, schema: str, geometry_field='geometry'):
-        get_geom_sql = f"SELECT srid FROM public.geometry_columns " \
+        select_geom_cols_sql = f"SELECT srid FROM public.geometry_columns " \
                        f"WHERE f_table_schema = '{schema}' " \
-                       f"AND f_table_name = '{table}'"
-        results = self.execute_sql(get_geom_sql)
-        if len(results) == 0:
-            logger.warning(f'Geometry column {geometry_field} for {schema}{table} not found in public.geometry_columns')
-            srid = None
+                       f"AND f_table_name = '{table}';"
+        results = self.execute_sql(select_geom_cols_sql)
+        if len(results) == 0 or results[0][0] == 0:
+            # Method 2
+            select_srid_sql = sql.SQL("SELECT DISTINCT ST_SRID({geometry_field}) "
+                                      "FROM {schema}.{table};").format(
+                                          geometry_field=sql.Identifier(geometry_field),
+                                          schema=sql.Identifier(schema),
+                                          table=sql.Identifier(table)
+                                      )
+            results = self.execute_sql(select_srid_sql)
+            if len(results) == 0:
+                logger.warning(f'Geometry column {geometry_field} for {schema}.{table} not found '
+                               f'in public.geometry_columns. Attempting to SELECT ST_SRID')
+            else:
+                srid = results[0][0]
         else:
             srid = results[0][0]
         return srid
 
-    def simplify_table(self, table: str, source_schema: str, simplify_tolerances: List[float], 
-                       dest_schema: str = None, dryrun: bool = False) -> List[str]:
+    def create_simplified_matviews(self,
+                                   table: str,
+                                   source_schema: str,
+                                   simplify_tolerances: List[float],
+                                   dest_schema: str = None,
+                                   dryrun: bool = False) -> List[str]:
         """
         Creates materialized views that are simplified versions of the source table. For each
         tolerance provided, one materialized view will be created. Tolerances are in units of
@@ -1489,25 +1504,27 @@ class Postgres(object):
                 simp_tol = round(simp_tol)
             logger.info(f'Simplifying {source_schema}.{table} - Tolerance: {simp_tol}')
             # Create name of new matview
-            simplified_matview_name = f'{table}_simplify{simp_tol}'.replace('.', 'x')
+            simplified_matview_name = f'{table}_simplify_{simp_tol}'.replace('.', 'x')
             # Determine if matview exists
             ve = self.view_exists(view=simplified_matview_name, schema=dest_schema,
                                   qualified=False)
             if ve is True:
                 logger.warning(f'View exists with destination name, skipping: '
-                               f'{dest_schema}.{simplified_matview_name}')
+                               f'{dest_schema}.{simplified_matview_name} ({self.host})')
+                simplified_matviews.append(f'{dest_schema}.{simplified_matview_name}')
                 continue
             # Create SQL to simplify
             simplify_sql = sql.SQL(
                 "CREATE MATERIALIZED VIEW {dest_schema}.{simplified_matview} AS "
                 "SELECT {non_geo_cols}, "
-                "ST_SimplifyPreserveTopology({geometry_col}, {simp_tol}) as geometry "
+                "ST_SetSRID(ST_SimplifyPreserveTopology({geometry_col}, {simp_tol}), {srid}) as geometry "
                 "FROM {source_schema}.{source_table};").format(
                     dest_schema=sql.Identifier(dest_schema),
                     simplified_matview=sql.Identifier(simplified_matview_name),
                     non_geo_cols=sql.SQL(',').join(non_geo_cols),
                     geometry_col=sql.Identifier(geometry_col),
                     simp_tol=sql.Literal(simp_tol),
+                    srid=sql.Literal(srid),
                     source_schema=sql.Identifier(source_schema),
                     source_table=sql.Identifier(table)
                 )
@@ -1515,7 +1532,7 @@ class Postgres(object):
             if dryrun is False:
                 # Execute SQL
                 self.execute_sql(simplify_sql, no_result_expected=True)
-            simplified_matviews.append(simplified_matview_name)
+            simplified_matviews.append(f'{dest_schema}.{simplified_matview_name}')
         matviews_log = "\n".join(simplified_matviews)
         logger.info(f'Created {len(simplified_matviews)} simplified materialized views:\n'
                     f'{matviews_log}')
