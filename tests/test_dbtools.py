@@ -16,6 +16,7 @@ pgconfig = load_pgconfig()
 
 TESTING_SCHEMA = os.getenv('TESTING_SCHEMA')
 TESTING_TABLE = os.getenv('TESTING_TABLE')
+TESTING_MATVIEW = os.getenv('TESTING_MATVIEW')
 if any([TESTING_SCHEMA is None, TESTING_TABLE is None]):
     logger.error('Must set TESTING_SCHEMA and TESTING_TABLE environmental variables.')
     sys.exit(-1)
@@ -65,3 +66,9 @@ class TestPostgres():
                                   gdf=True)
             check.is_instance(df, pd.DataFrame)
             check.is_instance(gdf, gpd.GeoDataFrame)
+
+    def test_get_matview_srid(self):
+        with Postgres(**pgconfig.non_wildcard_atts) as db_src:
+            srid = db_src.get_geometry_srid(table=TESTING_MATVIEW, schema=TESTING_SCHEMA)
+        check.is_not_none(srid)
+            
