@@ -543,7 +543,7 @@ class Postgres(object):
 
     def table_or_view_exists(self, database_object: str, schema: str = None) -> bool:
         qualified_database_object = f'{schema}.{database_object}'
-        return qualified_database_object in self.list_db_all()
+        return qualified_database_object in self.list_db_all(schemas=schema)
 
     def create_schema(self, schema_name, if_not_exists=True, dryrun=False)\
             -> bool:
@@ -809,22 +809,22 @@ class Postgres(object):
             se = self.create_schema(schema_name=schema, if_not_exists=True,
                                     dryrun=dryrun)
         else:
-            logger.info(f'Existing schema "{schema}" located.')
+            logger.debug(f'Existing schema "{schema}" located.')
             se = True
 
         # Check if table exists in schema, create if not
         qualified_table = f'{schema}.{table}'
         table_exists = self.table_exists(table=qualified_table, qualified=True)
         if table_exists:
-            logger.info(f'Existing table "{qualified_table}" located.')
+            logger.debug(f'Existing table "{qualified_table}" located.')
             te = True
             # Report count of table (if it exists (not a dryrun))
             starting_table_count = self.get_table_count(table=table,
                                                         schema=schema)
-            logger.info(f'{schema}.{table} starting count: '
-                        f'{starting_table_count}')
+            logger.debug(f'{schema}.{table} starting count: '
+                         f'{starting_table_count}')
         else:
-            logger.info(f'Table {qualified_table} not found.')
+            logger.debug(f'Table {qualified_table} not found.')
             te = False
             # te = self.create_table_like_df(table_name=qualified_table,
             #                                df=df,
@@ -860,10 +860,10 @@ class Postgres(object):
         if not dryrun:
             df.to_sql(name=table, schema=schema, con=con, if_exists=if_exists,
                       index=index, dtype=dtype)
-            logger.info(f'{schema}.{table} ending count: '
-                        f'{self.get_table_count(table, schema)}')
+            logger.debug(f'{schema}.{table} ending count: '
+                         f'{self.get_table_count(table, schema)}')
         else:
-            logger.info('--dryrun--')
+            logger.debug('--dryrun--')
 
     def gdf2postgis(self, gdf: gpd.GeoDataFrame, table, schema=None, con=None,
                     unique_on=None, if_exists='append', index=True,
@@ -1115,10 +1115,10 @@ class Postgres(object):
                            'displayed in error. Support for checking for '
                            'presence of tables using fully qualified names '
                            'under development.')
-            logger.info(f'Table "{table}" not found in database "{self.database}", '
+            logger.debug(f'Table "{table}" not found in database "{self.database}", '
                         f'it will be created.')
             # Get table starting count
-            logger.info('Starting count for {}: '
+            logger.debug('Starting count for {}: '
                         '{:,}'.format(table, self.get_table_count(table, schema=schema)))
         else:
             logger.info(f'Inserting records into {table}...')
@@ -1322,7 +1322,7 @@ class Postgres(object):
     def drop_table(self, table: str, schema: str, 
                    table_type: str = 'TABLE',
                    if_exists: bool = True, cascade: bool = False):
-        logger.info(f"Dropping {table_type}: {schema}.{table}")
+        logger.debug(f"Dropping {table_type}: {schema}.{table}")
         drop_statement = f"DROP {table_type}"
         if if_exists:
             drop_statement += " IF EXISTS"
@@ -1346,7 +1346,7 @@ class Postgres(object):
             logger.error(f'Invalid table type specified for RENAME: {table_type}, '
                          f'Must be one of: {valid_table_types}.')
         new_table = self.validate_pgtable_name_Length(new_table, modifyTableName=modifyTableName)
-        logger.info(f'Renaming table: {schema}.{existing_table}')
+        logger.debug(f'Renaming table: {schema}.{existing_table}')
         rename_statement = sql.SQL(f"ALTER {table_type} {schema}.{existing_table} "
                                    f"RENAME TO {new_table}").format(
                                        table_type=sql.Literal(table_type),
@@ -1363,7 +1363,7 @@ class Postgres(object):
                       max_count_diff=0,
                       old_table_suffix: str = 'outdated',
                       drop_old: bool = False):
-        logger.info(f'Hotswapping tables: {temp_table}->{active_table}')
+        logger.debug(f'Hotswapping tables: {temp_table}->{active_table}')
         # TODO: ideally some validation happens before the drop
         #       - counts are within expected difference range
         #       - geometries are valid
@@ -1395,11 +1395,11 @@ class Postgres(object):
                         max_diff=0):
         if schema2 is None:
             schema2 = schema1
-        logger.info(f'Comparing counts for {schema1}.{table1} and {schema2}.{table2}')
+        logger.debug(f'Comparing counts for {schema1}.{table1} and {schema2}.{table2}')
         t1_count = self.get_table_count(table=table1, schema=schema1)
         t2_count = self.get_table_count(table=table2, schema=schema2)
         counts_ok = abs(t1_count - t2_count) <= max_diff
-        logger.info(f'Counts OK: {counts_ok}')
+        logger.debug(f'Counts OK: {counts_ok}')
         if counts_ok is False:
             logger.warning(f'Counts are not OK:\n'
                            f'{schema1}.{table1}: {t1_count}\n'
