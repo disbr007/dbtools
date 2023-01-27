@@ -13,6 +13,6 @@ rtree
 scipy
 setuptools
 shapely
-sqlalchemy
+sqlalchemy<2.0
 urllib3
 python-dotenv
