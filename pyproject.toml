@@ -1,0 +1,81 @@
+[tool.black]
+line-length = 101
+# skip-string-normalization = 1
+
+[tool.ruff]
+line-length = 101
+
+# Enable pycodestyle (`E`) and Pyflakes (`F`) codes by default.
+# select = ["E", "F"]
+select = ["B", "D", "E", "F", "I", "N", "Q", "W"]
+ignore = [
+    # Ignored temporarily, would be good to include
+    "D100", # Missing docstring in public module
+    "D101", # Missing docstring in public class
+    "D102", # Missing docstring in public module
+    "D103", # Missing docstring in public function
+    "D104", # Missing docstring in public package
+    "D105", # Missing docstring in magic method
+    "D106", # Missing docstring in public nested class
+    "D107", # Missing docstring in __init__
+    "D401", # First line of docstring should be in imperative mood
+    "D417", # Missing argument descriptions in the docstring
+
+    # Plan to continue ignoring
+    "B905", # `zip()` without an explicit `strict=` parameter"
+    "D203", # one-blank-line-before-class
+    "D213", # multi-line-summary-second-line
+    "E722", # bare except
+]
+
+# Allow autofix for all enabled rules (when `--fix`) is provided.
+fixable = ["A", "B", "C", "D", "E", "F", "I"]
+unfixable = []
+
+exclude = [
+    "*view_config_schema.py",
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+    "dev_bin",
+]
+
+[tool.ruff.per-file-ignores]
+"view_config_schema.py" = [ # these classes/variables must match the aolayers schema
+    "N815", #mixedCase
+]
+"continuum_deploy.py" = ["B008"]
+"continuum_ingestion.py" = ["B008"]
+"bin/*" = ["B008"]
+"aoetl/geoserver_cli_apps/*" = ["B008"]
+"input_models.py" = ["B008", "N801", "N815"]
+"drawing_info.py" = ["B008", "N815"]
+"style_ysld.py" = ["N815"]
+"aoetl/models/adminapi/team.py" = ["N815"]
+
+[tool.ruff.isort]
+# known-local-folder = ["dbtools", "geotools"]
+
+[tool.ruff.flake8-quotes]
+docstring-quotes = "double"
+inline-quotes = "double"
+multiline-quotes = "double"
+
+# [tool.ruff.pycodestyle]
