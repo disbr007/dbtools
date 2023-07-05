@@ -48,7 +48,7 @@ class PGConfig:
                                   if value != '*'}
 
 
-def load_pgconfig(host: str = None):
+def load_pgconfig(host: str = None) -> PGConfig:
     pghost = os.environ.get('PGHOST', host)
     if pghost is None:
         logger.error('Must provided PGHOST, either as argument or via PGHOST environmental '

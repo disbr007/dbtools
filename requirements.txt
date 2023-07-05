@@ -15,4 +15,6 @@ setuptools
 shapely
 sqlalchemy<2.0
 urllib3
+types-psycopg2
+typer
 python-dotenv
