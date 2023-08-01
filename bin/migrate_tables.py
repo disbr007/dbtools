@@ -78,7 +78,7 @@ def migrate_table(source_table: TableRef, dest_table: TableRef, username: str = 
     if source_table.table != dest_table.table:
         replace_table_in_file_cmd = [
             "sed",
-            "-i", f"s/{source_table.table}/{dest_table.table}/g'", f"{dump_file}",
+            "-i", f"'s/{source_table.table}/{dest_table.table}/g'", f"{dump_file}",
         ]
         all_commands.append(replace_table_in_file_cmd)
 
