@@ -46,7 +46,9 @@ def run_subprocess(command: str, shell: bool = True):
     return proc_out, proc_err
 
 
-def migrate_table(source_table: TableRef, dest_table: TableRef, username: str = None, dryrun: bool = False):
+def migrate_table(
+    source_table: TableRef, dest_table: TableRef, username: str = None, dryrun: bool = False
+):
     logger.info(f"Migrating {source_table} -> {dest_table}")
     dump_file = f"{source_table.table}.sql"
     all_commands = []
@@ -57,7 +59,8 @@ def migrate_table(source_table: TableRef, dest_table: TableRef, username: str = 
         "--encoding=utf8",
         "--no-owner",
         f"--username={username}",
-        "-t", f"{source_table.schema}.{source_table.table}",
+        "-t",
+        f"{source_table.schema}.{source_table.table}",
         source_table.database,
         ">",
         f"{dump_file}",
@@ -66,19 +69,25 @@ def migrate_table(source_table: TableRef, dest_table: TableRef, username: str = 
     if source_table.database != dest_table.database:
         replace_db_in_file_cmd = [
             "sed",
-            "-i", f"'s/{source_table.database}/{dest_table.database}/g'", f"{dump_file}",
+            "-i",
+            f"'s/{source_table.database}/{dest_table.database}/g'",
+            f"{dump_file}",
         ]
         all_commands.append(replace_db_in_file_cmd)
     if source_table.schema != dest_table.schema:
         replace_schema_in_file_cmd = [
             "sed",
-            "-i", f"'s/{source_table.schema}/{dest_table.schema}/g'", f"{dump_file}",
+            "-i",
+            f"'s/{source_table.schema}/{dest_table.schema}/g'",
+            f"{dump_file}",
         ]
         all_commands.append(replace_schema_in_file_cmd)
     if source_table.table != dest_table.table:
         replace_table_in_file_cmd = [
             "sed",
-            "-i", f"s/{source_table.table}/{dest_table.table}/g'", f"{dump_file}",
+            "-i",
+            f"s/{source_table.table}/{dest_table.table}/g'",
+            f"{dump_file}",
         ]
         all_commands.append(replace_table_in_file_cmd)
 
@@ -163,29 +172,36 @@ def validate_dest_args(
 
 
 def main(
-    username: str = typer.Argument(None, help=("Database user to perform actions as. "
-                                               "Password read from environment.")),
+    username: str = typer.Argument(
+        None, help=("Database user to perform actions as. " "Password read from environment.")
+    ),
     source_host: List[str] = typer.Option(..., help="Source host to migrate from."),
     source_database: List[str] = typer.Option(..., help="Source database to migrate from"),
     source_schema: List[str] = typer.Option(..., help="Source schema(s) to migrate from."),
-    source_tables: List[str] = typer.Option(..., help="Source table(s) to migrate."),
+    source_tables: List[str] = typer.Option(
+        ...,
+        help="Source table(s) to migrate. Multiple can be provided using repeated flags or via text"
+        "file with one table name per line.",
+    ),
     dest_host: List[str] = typer.Option(..., help="Source host to migrate to."),
-    dest_database: List[str] = typer.Option([],
+    dest_database: List[str] = typer.Option(
+        [],
         help=(
             "Source database to migrate to. If not provided, will assume database of same name as "
             "source on dest_host."
-        )
+        ),
     ),
-    dest_schema: List[str] = typer.Option([],
+    dest_schema: List[str] = typer.Option(
+        [],
         help=(
             "Destination schemas to migrate to. If not provided, will assume schema of same name "
             "as source on dest_host."
-        )
+        ),
     ),
-    dest_tables: List[str] = typer.Option([],
-        help="Destination tables to migrate to. If not provided, will use source_table."
+    dest_tables: List[str] = typer.Option(
+        [], help="Destination tables to migrate to. If not provided, will use source_table."
     ),
-    dryrun: bool = typer.Option(False, help="Print commands but do not run.")
+    dryrun: bool = typer.Option(False, help="Print commands but do not run."),
 ):
     """Migrate database tables from one host to another.
 
@@ -225,7 +241,6 @@ def main(
     if len(dest_tables) == 0:
         dest_tables = source_tables
 
-
     # Create table references
     if len(source_host) == 1:
         source_host = [source_host[0] for _ in range(len(source_tables))]
@@ -247,7 +262,9 @@ def main(
         TableRef(*args) for args in zip(dest_host, dest_database, dest_schema, dest_tables)
     ]
 
-    for source_ref, dest_ref in tqdm(zip(source_references, dest_references), total=len(source_references)):
+    for source_ref, dest_ref in tqdm(
+        zip(source_references, dest_references), total=len(source_references)
+    ):
         migrate_table(source_table=source_ref, dest_table=dest_ref, username=username, dryrun=dryrun)
 
 
