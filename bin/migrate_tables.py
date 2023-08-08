@@ -1,12 +1,13 @@
 import logging
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from subprocess import PIPE
 from typing import List
 
-from tqdm import tqdm
 import typer
+from tqdm import tqdm
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -213,6 +214,9 @@ def main(
     be the same as the source. Otherwise, argument counts must either be singular (for
     database/schema) or match the number of source arguments.
     """
+    if username is None:
+        logger.error("No username provided.")
+        sys.exit(-1)
     if Path(source_tables[0]).exists():
         with open(source_tables[0], "r") as src:
             source_tables = []
