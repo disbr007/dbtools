@@ -376,7 +376,11 @@ class Postgres(object):
 
     def get_engine(self):
         """Create sqlalchemy.engine object."""
-        engine = create_engine(f'postgresql+psycopg2://{self.user}@{self.host}/{self.database}')
+        if self.password is not None:
+            cxn_str = f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}/{self.database}"
+        else:
+            cxn_str = f"postgresql+psycopg2://{self.user}@{self.host}/{self.database}"
+        engine = create_engine(cxn_str)
 
         return engine
 
