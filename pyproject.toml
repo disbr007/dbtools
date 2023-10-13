@@ -79,3 +79,8 @@ inline-quotes = "double"
 multiline-quotes = "double"
 
 # [tool.ruff.pycodestyle]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    'ignore:.*SQLAlchemy 2.0.*'
+]
