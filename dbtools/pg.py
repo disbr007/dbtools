@@ -50,6 +50,7 @@ class PGConfig:
 class ColumnDetails:
     column_name: str
     data_type: str  # TODO: enum
+    is_nullable: str
     character_maximum_length: int
     numeric_precision: int
 
@@ -689,10 +690,7 @@ class Postgres(object):
         columns_sql = sql.SQL(
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_schema = {} AND table_name = {};"
-        ).format(
-            sql.Literal(schema),
-            sql.Literal(table)
-        )
+        ).format(sql.Literal(schema), sql.Literal(table))
         results = self.execute_sql(columns_sql)
         columns = [d[0] for d in results]
 
@@ -740,12 +738,10 @@ class Postgres(object):
 
     def get_table_column_details(self, table: str, schema: str) -> List[ColumnDetails]:
         columns_sql = sql.SQL(
-            "SELECT column_name, data_type, character_maximum_length, numeric_precision "
+            "SELECT column_name, data_type, is_nullable, character_maximum_length, numeric_precision "
             "FROM information_schema.columns "
-            "WHERE table_schema = {} AND table_name = {};").format(
-                sql.Literal(schema),
-                sql.Literal(table)
-                )
+            "WHERE table_schema = {} AND table_name = {};"
+        ).format(sql.Literal(schema), sql.Literal(table))
         results = self.execute_sql(columns_sql)
         # Note the creation of ColumnDetails below - the results must
         # have columns in the same order as they are defined in the class.
