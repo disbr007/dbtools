@@ -46,6 +46,15 @@ class PGConfig:
         self.non_wildcard_atts = {att: value for att, value in self.__dict__.items() if value != "*"}
 
 
+@dataclass
+class ColumnDetails:
+    column_name: str
+    data_type: str  # TODO: enum
+    is_nullable: str
+    character_maximum_length: int
+    numeric_precision: int
+
+
 def load_pgconfig(host: str = None) -> PGConfig:
     pghost = os.environ.get("PGHOST", host)
     if pghost is None:
@@ -681,18 +690,13 @@ class Postgres(object):
 
         return count
 
-    def get_table_columns(self, table, schema=None) -> List:
-        """Get columns in passed table."""
-        if schema is not None:
-            self.cursor.execute(
-                sql.SQL("SELECT * FROM {}.{} LIMIT 0").format(
-                    sql.Identifier(schema), sql.Identifier(table)
-                )
-            )
-        else:
-            self.cursor.execute(sql.SQL("SELECT * FROM {} LIMIT 0").format(sql.Identifier(table)))
-
-        columns = [d[0] for d in self.cursor.description]
+    def get_table_columns(self, table: str, schema: str) -> List[str]:
+        columns_sql = sql.SQL(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = {} AND table_name = {};"
+        ).format(sql.Literal(schema), sql.Literal(table))
+        results = self.execute_sql(columns_sql)
+        columns = [d[0] for d in results]
 
         return columns
 
@@ -735,6 +739,18 @@ class Postgres(object):
         columns = [c for c in columns if c != geometry_col]
 
         return columns
+
+    def get_table_column_details(self, table: str, schema: str) -> List[ColumnDetails]:
+        columns_sql = sql.SQL(
+            "SELECT column_name, data_type, is_nullable, character_maximum_length, numeric_precision "
+            "FROM information_schema.columns "
+            "WHERE table_schema = {} AND table_name = {};"
+        ).format(sql.Literal(schema), sql.Literal(table))
+        results = self.execute_sql(columns_sql)
+        # Note the creation of ColumnDetails below - the results must
+        # have columns in the same order as they are defined in the class.
+        detailed_columns = [ColumnDetails(*r) for r in results]
+        return detailed_columns
 
     def get_values(self, table, columns, schema=None, distinct=False, where=None):
         """Get values in the passed columns(s) in the passed table. If
