@@ -405,9 +405,7 @@ class Postgres(object):
     def get_engine(self):
         """Create sqlalchemy.engine object."""
         if self.password is not None:
-            cxn_str = (
-                f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}/{self.database}"
-            )
+            cxn_str = f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}/{self.database}"
         else:
             cxn_str = f"postgresql+psycopg2://{self.user}@{self.host}/{self.database}"
         engine = create_engine(cxn_str)
@@ -424,16 +422,28 @@ class Postgres(object):
 
         return engine
 
-    def get_pg_relkind(
-        self, relname: str, schema: str
-    ) -> Literal["r", "i", "S", "v", "m", "c", "t", "f"]:
+    def get_pg_relkind(self, relname: str, schema: str) -> Literal['r', 'i', 'S', 'v', 'm', 'c', 't', 'f']:
+        """Get the type of object that relname is.
+
+        r = ordinary table
+        i = index
+        S = sequence
+        v = view
+        m = materialized view
+        c = composite type
+        t = TOAST table
+        f = foreign table
+        """
         relkind_sql = sql.SQL(
             "SELECT relkind "
             "FROM pg_catalog.pg_class AS c "
             "JOIN pg_catalog.pg_namespace AS ns "
             "  ON c.relnamespace = ns.oid "
             "WHERE relname = {relname} AND nspname = {schema}; "
-        ).format(relname=sql.Literal(relname), schema=sql.Literal(schema))
+        ).format(
+            relname=sql.Literal(relname),
+            schema=sql.Literal(schema)
+        )
         results = self.execute_sql(relkind_sql)
         if len(results) > 1:
             logger.error(f"More than one result found for relname: {schema}.{relname}")
@@ -772,10 +782,10 @@ class Postgres(object):
     def get_view_column_details(self, matview: str, schema: str) -> List[ColumnDetails]:
         columns_sql = sql.SQL(
             "SELECT a.attname as column_name, "
-            "pg_catalog.format_type(a.atttypid, a.atttypmod) as data_type, "
-            "a.attnotnull as is_nullable, "
-            "null as character_maximum_length, "
-            "null as numeric_precision "
+                    "pg_catalog.format_type(a.atttypid, a.atttypmod) as data_type, "
+                    "a.attnotnull as is_nullable, "
+                    "null as character_maximum_length, "
+                    "null as numeric_precision "
             "FROM pg_attribute a "
             "JOIN pg_class t on a.attrelid = t.oid "
             "JOIN pg_namespace s on t.relnamespace = s.oid "
@@ -784,7 +794,10 @@ class Postgres(object):
             "AND t.relname = {matview} "
             "AND s.nspname = {schema} "
             "ORDER BY a.attnum;"
-        ).format(matview=sql.Literal(matview), schema=sql.Literal(schema))
+            ).format(
+                matview=sql.Literal(matview),
+                schema=sql.Literal(schema)
+            )
         results = self.execute_sql(columns_sql)
         detailed_columns = [ColumnDetails(*r) for r in results]
         return detailed_columns
@@ -795,14 +808,12 @@ class Postgres(object):
         Can pass table, view, or matview as "table".
         """
         object_type = self.get_pg_relkind(relname=table, schema=schema)
-        if object_type == "r":
+        if object_type == 'r':
             column_details = self.get_table_column_details(table=table, schema=schema)
-        elif object_type in ["v", "m"]:
+        elif object_type in ['v', 'm']:
             column_details = self.get_view_column_details(matview=table, schema=schema)
         else:
-            msg = (
-                f"Unsupported object type ('{object_type}') for getting columns. ({schema}.{table})"
-            )
+            msg = f"Unsupported object type ('{object_type}') for getting columns. ({schema}.{table})"
             logger.error(msg)
             raise Exception(msg)
         return column_details
