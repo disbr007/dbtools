@@ -1745,6 +1745,18 @@ class Postgres(object):
         )
         return simplified_matviews
 
+    def get_matview_defintion(self, matview: str, schema=str) -> str:
+        matview_def_sql = sql.SQL("SELECT pg_get_viewdef('{schema}.{matview}')").format(
+            schema=sql.SQL(schema),
+            matview=sql.SQL(matview)
+        )
+        result = self.execute_sql(matview_def_sql)
+        if len(result) != 1:
+            msg = f"Error retrieving view definition. Expected exactly one result, got: {len(result)}"
+            logger.error(msg)
+            raise Exception(msg)
+        return result[0][0]
+
 
 # TODO:
 #  Create SQLQuery class
