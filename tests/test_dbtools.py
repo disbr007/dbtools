@@ -4,6 +4,7 @@ import sys
 
 import geopandas as gpd
 import pandas as pd
+import pytest
 import pytest_check as check
 
 from dbtools.pg import Postgres, ColumnDetails
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 TESTING_SCHEMA = os.getenv("TESTING_SCHEMA")
 TESTING_TABLE = os.getenv("TESTING_TABLE")
 TESTING_MATVIEW = os.getenv("TESTING_MATVIEW")
+TESTING_VIEW = os.getenv("TESTING_VIEW")
 if any([TESTING_SCHEMA is None, TESTING_TABLE is None]):
     logger.error("Must set TESTING_SCHEMA and TESTING_TABLE environmental variables.")
     sys.exit(-1)
@@ -30,6 +32,15 @@ class TestPostgres:
         began = engine.begin()
         cxn = began.conn
         check.is_false(cxn.closed)
+
+    @pytest.mark.parametrize("relname,expected_relkind", [
+        (TESTING_TABLE, "r"),
+        (TESTING_VIEW, "v"),
+        (TESTING_MATVIEW, "m")
+    ])
+    def test_get_pg_relkind(self, db_src: Postgres, relname: str, expected_relkind: str, schema: str = TESTING_SCHEMA):
+        relkind = db_src.get_pg_relkind(relname=relname, schema=schema)
+        check.equal(relkind, expected_relkind)
 
     def test_list_schemas(self, db_src: Postgres):
         schemas = db_src.list_schemas()
@@ -82,9 +93,33 @@ class TestPostgres:
         check.equal(len(retrieved_columns), 15)
         check.equal(sorted(existing_columns), sorted(retrieved_columns))
 
-    def test_get_column_details(self, db_src: Postgres):
+    def test_get_table_column_details(self, db_src: Postgres):
         column_details = db_src.get_table_column_details(table=TESTING_TABLE, schema=TESTING_SCHEMA)
         test_column = column_details[0]
         check.is_instance(test_column, ColumnDetails)
         check.equal(test_column.column_name, "index")
         check.equal(test_column.data_type, "bigint")
+
+    @pytest.mark.parametrize("view_name,col_index,col_name,col_type", [
+        (TESTING_VIEW, 5, "Entity_Name", "text"),
+        (TESTING_MATVIEW, 0, "year", "bigint")
+    ])
+    def test_get_view_column_details(self, db_src: Postgres, view_name: str, 
+                                     col_index: int, col_name: str, col_type: str):
+        column_details = db_src.get_view_column_details(matview=view_name, schema=TESTING_SCHEMA)
+        test_column = column_details[col_index]
+        check.is_instance(test_column, ColumnDetails)
+        check.equal(test_column.column_name, col_name)
+        check.equal(test_column.data_type, col_type)
+
+    @pytest.mark.parametrize("name,column_index,column_name,column_type", [
+        (TESTING_VIEW, 0, "index", "bigint"),
+        (TESTING_VIEW, 5, "Entity_Name", "text"),
+        (TESTING_MATVIEW, 0, "year", "bigint")
+    ])
+    def test_get_column_details(self, db_src: Postgres, name: str, column_name: str, column_index: int, column_type: str, schema: str = TESTING_SCHEMA):
+        column_details = db_src.get_column_details(table=name, schema=schema)
+        test_column = column_details[column_index]
+        check.is_instance(test_column, ColumnDetails)
+        check.equal(test_column.column_name, column_name)
+        check.equal(test_column.data_type, column_type)
