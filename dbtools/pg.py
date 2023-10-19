@@ -1746,6 +1746,7 @@ class Postgres(object):
         return simplified_matviews
 
     def get_view_defintion(self, view: str, schema=str) -> str:
+        """Retrieve the definition of the passed view as text."""
         view_def_sql = sql.SQL("SELECT pg_get_viewdef('{schema}.{matview}')").format(
             schema=sql.SQL(schema),
             matview=sql.SQL(view)
