@@ -125,6 +125,6 @@ class TestPostgres:
         check.equal(test_column.data_type, column_type)
 
     def test_get_view_definition(self, db_src: Postgres):
-        view_definition = db_src.get_view_defintion(matview=TESTING_MATVIEW, schema=TESTING_SCHEMA)
+        view_definition = db_src.get_view_definition(matview=TESTING_MATVIEW, schema=TESTING_SCHEMA)
         check.is_in("SELECT", view_definition)
         check.is_in("FROM", view_definition)
