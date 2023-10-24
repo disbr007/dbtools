@@ -15,7 +15,7 @@ TESTING_SCHEMA = os.getenv("TESTING_SCHEMA")
 TESTING_TABLE = os.getenv("TESTING_TABLE")
 TESTING_MATVIEW = os.getenv("TESTING_MATVIEW")
 TESTING_VIEW = os.getenv("TESTING_VIEW")
-if any([obj is None for obj in [TESTING_SCHEMA, TESTING_TABLE, TESTING_VIEW, TESTING_MATVIEW]]):
+if None in [TESTING_SCHEMA, TESTING_TABLE, TESTING_VIEW, TESTING_MATVIEW]:
     logger.error("Must set TESTING_SCHEMA and TESTING_TABLE environmental variables.")
     sys.exit(-1)
 

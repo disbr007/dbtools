@@ -6,7 +6,7 @@ import logging
 import re
 import os
 from pathlib import Path
-from typing import Literal, List, Union, Tuple
+from typing import Literal, List, Union, Optional, Tuple
 
 from dotenv import load_dotenv
 import geopandas as gpd
@@ -49,10 +49,10 @@ class PGConfig:
 @dataclass
 class ColumnDetails:
     column_name: str
-    data_type: str  # TODO: enum
-    is_nullable: str
-    character_maximum_length: int
-    numeric_precision: int
+    data_type: str
+    is_nullable: Optional[str]
+    character_maximum_length: Optional[int]
+    numeric_precision: Optional[int]
 
 
 def load_pgconfig(host: str = None) -> PGConfig:
