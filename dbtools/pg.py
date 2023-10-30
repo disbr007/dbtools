@@ -783,7 +783,11 @@ class Postgres(object):
         columns_sql = sql.SQL(
             "SELECT a.attname as column_name, "
                     "pg_catalog.format_type(a.atttypid, a.atttypmod) as data_type, "
-                    "a.attnotnull as is_nullable, "
+                    "CASE "
+                    "WHEN a.attnotnull = true THEN 'YES' "
+                    "WHEN a.attnotnull = false THEN 'NO' "
+                    "END AS is_nullable, "
+                    # "a.attnotnull as is_nullable, "
                     "null as character_maximum_length, "
                     "null as numeric_precision "
             "FROM pg_attribute a "
