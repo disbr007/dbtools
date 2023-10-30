@@ -787,7 +787,6 @@ class Postgres(object):
                     "WHEN a.attnotnull = true THEN 'YES' "
                     "WHEN a.attnotnull = false THEN 'NO' "
                     "END AS is_nullable, "
-                    # "a.attnotnull as is_nullable, "
                     "null as character_maximum_length, "
                     "null as numeric_precision "
             "FROM pg_attribute a "
