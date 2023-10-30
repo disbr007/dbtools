@@ -123,3 +123,8 @@ class TestPostgres:
         check.is_instance(test_column, ColumnDetails)
         check.equal(test_column.column_name, column_name)
         check.equal(test_column.data_type, column_type)
+
+    def test_get_view_definition(self, db_src: Postgres):
+        view_definition = db_src.get_view_definition(view=TESTING_MATVIEW, schema=TESTING_SCHEMA)
+        check.is_in("SELECT", view_definition)
+        check.is_in("FROM", view_definition)
