@@ -6,7 +6,7 @@ import logging
 import re
 import os
 from pathlib import Path
-from typing import Union, List, Tuple
+from typing import Literal, List, Union, Optional, Tuple
 
 from dotenv import load_dotenv
 import geopandas as gpd
@@ -49,10 +49,10 @@ class PGConfig:
 @dataclass
 class ColumnDetails:
     column_name: str
-    data_type: str  # TODO: enum
-    is_nullable: str
-    character_maximum_length: int
-    numeric_precision: int
+    data_type: str
+    is_nullable: Optional[str]
+    character_maximum_length: Optional[int]
+    numeric_precision: Optional[int]
 
 
 def load_pgconfig(host: str = None) -> PGConfig:
@@ -422,6 +422,33 @@ class Postgres(object):
 
         return engine
 
+    def get_pg_relkind(self, relname: str, schema: str) -> Literal['r', 'i', 'S', 'v', 'm', 'c', 't', 'f']:
+        """Get the type of object that relname is.
+
+        r = ordinary table
+        i = index
+        S = sequence
+        v = view
+        m = materialized view
+        c = composite type
+        t = TOAST table
+        f = foreign table
+        """
+        relkind_sql = sql.SQL(
+            "SELECT relkind "
+            "FROM pg_catalog.pg_class AS c "
+            "JOIN pg_catalog.pg_namespace AS ns "
+            "  ON c.relnamespace = ns.oid "
+            "WHERE relname = {relname} AND nspname = {schema}; "
+        ).format(
+            relname=sql.Literal(relname),
+            schema=sql.Literal(schema)
+        )
+        results = self.execute_sql(relkind_sql)
+        if len(results) > 1:
+            logger.error(f"More than one result found for relname: {schema}.{relname}")
+        return results[0][0]
+
     def list_schemas(self, include_infoschemas=False):
         """List all schemas in the database"""
         logger.debug("Listing schemas...")
@@ -730,10 +757,10 @@ class Postgres(object):
         return unique_cols
 
     def get_non_geo_columns(self, table: str, schema: str, geometry_col: str = "geometry") -> List:
-        """
-        Get the columns in the source table - they have to be listed
-        explicitly in order to not select the existing geometry when creating
-        new tables/views with a transformed geometry.
+        """Get the columns in the source table.
+
+        They have to be listed explicitly in order to not select the existing
+        geometry when creating new tables/views with a transformed geometry.
         """
         columns = self.get_table_columns(table=table, schema=schema)
         columns = [c for c in columns if c != geometry_col]
@@ -752,9 +779,53 @@ class Postgres(object):
         detailed_columns = [ColumnDetails(*r) for r in results]
         return detailed_columns
 
+    def get_view_column_details(self, matview: str, schema: str) -> List[ColumnDetails]:
+        columns_sql = sql.SQL(
+            "SELECT a.attname as column_name, "
+                    "pg_catalog.format_type(a.atttypid, a.atttypmod) as data_type, "
+                    "CASE "
+                    "WHEN a.attnotnull = true THEN 'YES' "
+                    "WHEN a.attnotnull = false THEN 'NO' "
+                    "END AS is_nullable, "
+                    "null as character_maximum_length, "
+                    "null as numeric_precision "
+            "FROM pg_attribute a "
+            "JOIN pg_class t on a.attrelid = t.oid "
+            "JOIN pg_namespace s on t.relnamespace = s.oid "
+            "WHERE a.attnum > 0 "
+            "AND NOT a.attisdropped "
+            "AND t.relname = {matview} "
+            "AND s.nspname = {schema} "
+            "ORDER BY a.attnum;"
+            ).format(
+                matview=sql.Literal(matview),
+                schema=sql.Literal(schema)
+            )
+        results = self.execute_sql(columns_sql)
+        detailed_columns = [ColumnDetails(*r) for r in results]
+        return detailed_columns
+
+    def get_column_details(self, table: str, schema: str) -> List[ColumnDetails]:
+        """Get column information for any object passed.
+
+        Can pass table, view, or matview as "table".
+        """
+        object_type = self.get_pg_relkind(relname=table, schema=schema)
+        if object_type == 'r':
+            column_details = self.get_table_column_details(table=table, schema=schema)
+        elif object_type in ['v', 'm']:
+            column_details = self.get_view_column_details(matview=table, schema=schema)
+        else:
+            msg = f"Unsupported object type ('{object_type}') for getting columns. ({schema}.{table})"
+            logger.error(msg)
+            raise Exception(msg)
+        return column_details
+
     def get_values(self, table, columns, schema=None, distinct=False, where=None):
-        """Get values in the passed columns(s) in the passed table. If
-        distinct, unique values returned (across all columns passed)"""
+        """Get values in the passed columns(s) in the passed table.
+
+        If distinct, unique values returned (across all columns passed).
+        """
         if isinstance(columns, str):
             columns = [columns]
 
@@ -1676,6 +1747,19 @@ class Postgres(object):
             f"Created {len(simplified_matviews)} simplified materialized views:\n" f"{matviews_log}"
         )
         return simplified_matviews
+
+    def get_view_definition(self, view: str, schema: str) -> str:
+        """Retrieve the definition of the passed view as text."""
+        view_def_sql = sql.SQL("SELECT pg_get_viewdef('{schema}.{view}')").format(
+            schema=sql.SQL(schema),
+            view=sql.SQL(view)
+        )
+        result = self.execute_sql(view_def_sql)
+        if len(result) != 1:
+            msg = f"Error retrieving view definition. Expected exactly one result, got: {len(result)}"
+            logger.error(msg)
+            raise Exception(msg)
+        return result[0][0]
 
 
 # TODO:
