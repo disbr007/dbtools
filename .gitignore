@@ -138,3 +138,6 @@ clarie_repos
 
 # DB connections
 dbtools-config.yml
+
+# Logs
+logs/*
