@@ -21,6 +21,13 @@ formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(messag
 ch.setFormatter(formatter)
 logger.addHandler(ch)
 
+run_starttime = datetime.now().strftime("%Y%b%d_%H%M%S_%f").lower()
+logfile = Path(LOGS_DIR) / f"{Path(__file__).stem}_{run_starttime}.log"
+fh = logging.FileHandler(logfile)
+fh.setFormatter(formatter)
+fh.setLevel(logging.DEBUG)
+logger.addHandler(fh)
+
 
 @dataclass
 class TableRef:
