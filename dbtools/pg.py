@@ -467,7 +467,9 @@ class Postgres(object):
         logger.debug(f"Schema count: {len(schemas)}")
         return schemas
 
-    def list_tables(self, schemas=None, qualified: bool = True, skip_schemas=DEF_SKIP_SCHEMAS):
+    def list_tables(
+        self, schemas=None, qualified: bool = True, skip_schemas=DEF_SKIP_SCHEMAS
+    ) -> List[str]:
         """List all tables in the database."""
         logger.debug("Listing tables...")
         tables_sql = sql.SQL("SELECT schemaname, tablename " "FROM pg_catalog.pg_tables")
@@ -490,7 +492,7 @@ class Postgres(object):
 
     def list_views(
         self, schemas: list = None, qualified: bool = True, skip_schemas=DEF_SKIP_SCHEMAS
-    ):
+    ) -> List[str]:
         logger.debug("Listing views...")
         views_sql = sql.SQL(
             """SELECT schemaname, viewname
@@ -513,7 +515,7 @@ class Postgres(object):
 
     def list_matviews(
         self, schemas: list = None, qualified: bool = True, skip_schemas=DEF_SKIP_SCHEMAS
-    ):
+    ) -> List[str]:
         logger.debug("Listing Materialized Views...")
         matviews_sql = sql.SQL(
             """SELECT schemaname, matviewname
@@ -536,7 +538,7 @@ class Postgres(object):
 
         return schemas_matviews
 
-    def list_db_all(self, schemas: Union[str, list], qualified: bool = True):
+    def list_db_all(self, schemas: Union[str, list], qualified: bool = True) -> List[str]:
         tables = self.list_tables(schemas=schemas, qualified=qualified)
         views = self.list_views(schemas=schemas, qualified=qualified)
         matviews = self.list_matviews(schemas=schemas, qualified=qualified)
