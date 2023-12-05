@@ -508,7 +508,7 @@ class Postgres(object):
         if qualified:
             schemas_views = ["{}.{}".format(s, t) for s, t in schemas_views if s not in skip_schemas]
         else:
-            schemas_views = [t for t in schemas_views]
+            schemas_views = [v for s, v in schemas_views]
         logger.debug("Views: {}".format(schemas_views))
 
         return schemas_views
