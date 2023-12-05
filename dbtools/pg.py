@@ -30,7 +30,7 @@ pd.set_option("mode.chained_assignment", None)
 
 
 # Constants
-DEF_SKIP_SCHEMAS = ["information_schema", "pg_catalog"]
+DEF_SKIP_SCHEMAS = ("information_schema", "pg_catalog")
 FAIL = "fail"
 
 
