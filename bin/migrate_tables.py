@@ -1,10 +1,14 @@
 import logging
 import subprocess
 import sys
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from subprocess import PIPE
 from typing import List
+
+from dbtools.pg import Postgres
+from dbtools.constants import LOGS_DIR
 
 import typer
 from tqdm import tqdm
@@ -16,6 +20,13 @@ ch.setLevel(logging.INFO)
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 ch.setFormatter(formatter)
 logger.addHandler(ch)
+
+run_starttime = datetime.now().strftime("%Y%b%d_%H%M%S_%f").lower()
+logfile = Path(LOGS_DIR) / f"{Path(__file__).stem}_{run_starttime}.log"
+fh = logging.FileHandler(logfile)
+fh.setFormatter(formatter)
+fh.setLevel(logging.DEBUG)
+logger.addHandler(fh)
 
 
 @dataclass
@@ -50,6 +61,17 @@ def run_subprocess(command: str, shell: bool = True):
 def migrate_table(
     source_table: TableRef, dest_table: TableRef, username: str = None, dryrun: bool = False
 ):
+    # Ensure destination table does not exist already (if it does there may be unexpected results
+    # from the upload command, e.g. duplicate records)
+    with Postgres(host=dest_table.host, database=dest_table.database, user=username) as db_src:
+        dest_table_exists = db_src.table_or_view_exists(dest_table.table, schema=dest_table.schema)
+        if dest_table_exists:
+            logger.error(
+                f"Destination table exists, skipping upload: {dest_table.schema}.{dest_table.table}"
+            )
+            success = False
+            return success
+
     logger.info(f"Migrating {source_table} -> {dest_table}")
     dump_file = f"{source_table.table}.sql"
     all_commands = []
@@ -87,7 +109,7 @@ def migrate_table(
         replace_table_in_file_cmd = [
             "sed",
             "-i",
-            f"s/{source_table.table}/{dest_table.table}/g'",
+            f"'s/{source_table.table}/{dest_table.table}/g'",
             f"{dump_file}",
         ]
         all_commands.append(replace_table_in_file_cmd)
@@ -114,9 +136,13 @@ def migrate_table(
         logger.debug(migrate_cmd)
         out, err = run_subprocess(migrate_cmd)
         logger.info(f"\nOutput:\n{out}\nErr:\n{err}")
+        success = True
     else:
         logger.info(migrate_cmd)
         logger.info("--dryrun--")
+        success = False
+
+    return success
 
 
 def validate_source_args(
@@ -125,6 +151,7 @@ def validate_source_args(
     source_schema: List[str],
     source_tables: List[str],
 ):
+    """Validates counts of arguments make sense."""
     num_src_host_provided = len(source_host)
     num_src_database_provided = len(source_database)
     num_src_schema_provided = len(source_schema)
@@ -151,6 +178,7 @@ def validate_source_args(
 def validate_dest_args(
     dest_host: List[str], dest_database: List[str], dest_schema: List[str], dest_tables: List[str]
 ):
+    """Validates counts of arguments make sense."""
     num_dest_host_provided = len(dest_host)
     num_dest_database_provided = len(dest_database)
     num_dest_schema_provided = len(dest_schema)
@@ -170,6 +198,27 @@ def validate_dest_args(
         logger.error(error_msg)
         raise ValueError(error_msg)
     return valid_source_args
+
+
+def write_logs(successful_migrations: List[TableRef], failed_migrations: List[TableRef]):
+    """Writes log files about script run.
+
+    Two logs files are written, one for successful migrations, one for unsuccessful. The logs are
+    formatted with each line having the destination [host].[database].[schema].[table]
+    """
+    timestamp = datetime.now().strftime("%Y%b%d_%H%M%S_%f").lower()
+    success_out_file = LOGS_DIR / f"migrate_tables-successful-{timestamp}.txt"
+    failed_out_file = LOGS_DIR / f"migrate_tables-failed-{timestamp}.txt"
+    if len(successful_migrations) > 0:
+        logger.info(f"Writing successful migration references to: {success_out_file}")
+        with open(success_out_file, "w") as dst:
+            for sm in successful_migrations:
+                dst.write(f"{sm.host}.{sm.database}.{sm.schema}.{sm.table}\n")
+    if len(failed_migrations) > 0:
+        logger.info(f"Writing failed migration references to: {failed_out_file}")
+        with open(failed_out_file, "w") as dst:
+            for fm in failed_migrations:
+                dst.write(f"{fm.host}.{fm.database}.{fm.schema}.{fm.table}\n")
 
 
 def main(
@@ -266,10 +315,21 @@ def main(
         TableRef(*args) for args in zip(dest_host, dest_database, dest_schema, dest_tables)
     ]
 
+    successful_migrations = []
+    failed_migrations = []
     for source_ref, dest_ref in tqdm(
         zip(source_references, dest_references), total=len(source_references)
     ):
-        migrate_table(source_table=source_ref, dest_table=dest_ref, username=username, dryrun=dryrun)
+        success = migrate_table(
+            source_table=source_ref, dest_table=dest_ref, username=username, dryrun=dryrun
+        )
+        if success is True:
+            successful_migrations.append(dest_ref)
+        elif success is False and dryrun is not True:
+            failed_migrations.append(dest_ref)
+
+    if dryrun is not True:
+        write_logs(successful_migrations, failed_migrations)
 
 
 if __name__ == "__main__":
