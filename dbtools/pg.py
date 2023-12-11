@@ -1554,6 +1554,12 @@ class Postgres(object):
         old_table_suffix: str = "outdated",
         drop_old: bool = False,
     ):
+        """Replaces an one table with another.
+
+        After validating that both tables exist, drops the "active_table"
+        and then renames the "temp_table" to have the name that the
+        activate table previously had.
+        """
         logger.debug(f"Hotswapping tables: {temp_table}->{active_table}")
         # TODO: ideally some validation happens before the drop
         #       - [x] counts are within expected difference range
