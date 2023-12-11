@@ -8,7 +8,8 @@ import pytest
 from dbtools.pg import Postgres, load_pgconfig
 
 
-dotenv.load_dotenv('.env.test')
+dotenv.load_dotenv(".env.test")
+
 
 @pytest.fixture(name="pgconfig")
 def fixture_pgconfig():

@@ -305,12 +305,11 @@ def drop_z_dim(gdf: gpd.GeoDataFrame):
 
 @dataclass
 class Postgres(object):
-    """
-    Class for interacting with Postgres database using psycopg2. This
-    allows keeping a connection and cursor open while performing multiple
-    operations. Best used with a context manager, i.e.:
-    with Postgres(db_name) as db:
-        ...
+    """Class for interacting with Postgres database using psycopg2.
+
+    This allows keeping a connection and cursor open while performing multiple operations.
+    Best used with a context manager, i.e.: with Postgres(db_name) as db:
+        db.execute_sql(...)
     """
 
     _instance = None
@@ -348,6 +347,7 @@ class Postgres(object):
             list: sqlalchemy.sql.sqltypes.ARRAY,
             dict: sqlalchemy.sql.sqltypes.JSON,
         }
+        self._relkind_to_table_type = {"r": "TABLE", "v": "VIEW", "m": "MATERIALIZED VIEW"}
 
     def __enter__(self):
         return self
@@ -1518,6 +1518,16 @@ class Postgres(object):
         )
         self.execute_sql(drop_statement, no_result_expected=True)
 
+    def drop_table_or_view(self, database_object: str, schema: str, **kwargs):
+        """Determines the type of object passed, then drops it."""
+        relkind = self.get_pg_relkind(relname=database_object, schema=schema)
+        self.drop_table(
+            table=database_object,
+            schema=schema,
+            table_type=self._relkind_to_table_type[relkind],
+            **kwargs,
+        )
+
     def rename_table(
         self,
         existing_table: str,
@@ -1544,6 +1554,16 @@ class Postgres(object):
         )
         logger.debug(rename_statement.as_string(self.connection))
         self.execute_sql(rename_statement, no_result_expected=True)
+
+    def rename_table_or_view(self, existing_object: str, new_object: str, schema: str, **kwargs):
+        relkind = self.get_pg_relkind(relname=existing_object, schema=schema)
+        self.rename_table(
+            existing_table=existing_object,
+            new_table=new_object,
+            schema=schema,
+            table_type=self._relkind_to_table_type[relkind],
+            **kwargs,
+        )
 
     def hotswap_table(
         self,
@@ -1576,8 +1596,8 @@ class Postgres(object):
 
         # Rename active to dated table name
         outdated_table = f"{active_table}_{old_table_suffix}"
-        if self.table_exists(table=outdated_table, schema=schema):
-            self.drop_table(outdated_table, schema=schema, cascade=True)
+        if self.table_or_view_exists(database_object=outdated_table, schema=schema):
+            self.drop_table_or_view(database_object=outdated_table, schema=schema, cascade=True)
         self.rename_table(existing_table=active_table, new_table=outdated_table, schema=schema)
 
         # Rename temp table to active table
