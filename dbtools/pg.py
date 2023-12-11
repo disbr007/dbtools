@@ -577,9 +577,10 @@ class Postgres(object):
         return schema in db_schemas
 
     def table_exists(self, table: str, schema: str = None, qualified: bool = True):
-        """
-        True if table exists in schema
+        """True if table exists in schema.
+
         Args:
+        ----
             table: str
                 Name of table to check existence of
             schema: str
@@ -608,7 +609,7 @@ class Postgres(object):
         return qualified_database_object in self.list_db_all(schemas=schema)
 
     def create_schema(self, schema_name, if_not_exists=True, dryrun=False) -> bool:
-        """Creates a new schema of [schema_name]"""
+        """Creates a new schema of [schema_name]."""
         schema_name_exists = self.schema_exists(schema_name)
         if schema_name_exists:
             logger.debug(f"Schema already exists: {schema_name}")
@@ -1555,8 +1556,8 @@ class Postgres(object):
     ):
         logger.debug(f"Hotswapping tables: {temp_table}->{active_table}")
         # TODO: ideally some validation happens before the drop
-        #       - counts are within expected difference range
-        #       - geometries are valid
+        #       - [x] counts are within expected difference range
+        #       - [ ] geometries are valid
         #       - etc.
         #       -> move all validation to new _validate_hotswap() method
         if max_count_diff is not None:
