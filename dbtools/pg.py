@@ -305,12 +305,11 @@ def drop_z_dim(gdf: gpd.GeoDataFrame):
 
 @dataclass
 class Postgres(object):
-    """
-    Class for interacting with Postgres database using psycopg2. This
-    allows keeping a connection and cursor open while performing multiple
-    operations. Best used with a context manager, i.e.:
-    with Postgres(db_name) as db:
-        ...
+    """Class for interacting with Postgres database using psycopg2.
+
+    This allows keeping a connection and cursor open while performing multiple operations.
+    Best used with a context manager, i.e.: with Postgres(db_name) as db:
+        db.execute_sql(...)
     """
 
     _instance = None
@@ -348,6 +347,7 @@ class Postgres(object):
             list: sqlalchemy.sql.sqltypes.ARRAY,
             dict: sqlalchemy.sql.sqltypes.JSON,
         }
+        self._relkind_to_table_type = {"r": "TABLE", "v": "VIEW", "m": "MATERIALIZED VIEW"}
 
     def __enter__(self):
         return self
@@ -577,9 +577,10 @@ class Postgres(object):
         return schema in db_schemas
 
     def table_exists(self, table: str, schema: str = None, qualified: bool = True):
-        """
-        True if table exists in schema
+        """True if table exists in schema.
+
         Args:
+        ----
             table: str
                 Name of table to check existence of
             schema: str
@@ -608,7 +609,7 @@ class Postgres(object):
         return qualified_database_object in self.list_db_all(schemas=schema)
 
     def create_schema(self, schema_name, if_not_exists=True, dryrun=False) -> bool:
-        """Creates a new schema of [schema_name]"""
+        """Creates a new schema of [schema_name]."""
         schema_name_exists = self.schema_exists(schema_name)
         if schema_name_exists:
             logger.debug(f"Schema already exists: {schema_name}")
@@ -1517,6 +1518,16 @@ class Postgres(object):
         )
         self.execute_sql(drop_statement, no_result_expected=True)
 
+    def drop_table_or_view(self, database_object: str, schema: str, **kwargs):
+        """Determines the type of object passed, then drops it."""
+        relkind = self.get_pg_relkind(relname=database_object, schema=schema)
+        self.drop_table(
+            table=database_object,
+            schema=schema,
+            table_type=self._relkind_to_table_type[relkind],
+            **kwargs,
+        )
+
     def rename_table(
         self,
         existing_table: str,
@@ -1544,6 +1555,16 @@ class Postgres(object):
         logger.debug(rename_statement.as_string(self.connection))
         self.execute_sql(rename_statement, no_result_expected=True)
 
+    def rename_table_or_view(self, existing_object: str, new_object: str, schema: str, **kwargs):
+        relkind = self.get_pg_relkind(relname=existing_object, schema=schema)
+        self.rename_table(
+            existing_table=existing_object,
+            new_table=new_object,
+            schema=schema,
+            table_type=self._relkind_to_table_type[relkind],
+            **kwargs,
+        )
+
     def hotswap_table(
         self,
         active_table: str,
@@ -1553,10 +1574,16 @@ class Postgres(object):
         old_table_suffix: str = "outdated",
         drop_old: bool = False,
     ):
+        """Replaces one table with another.
+
+        After validating that both tables exist, drops the "active_table"
+        and then renames the "temp_table" to have the name that the
+        activate table previously had.
+        """
         logger.debug(f"Hotswapping tables: {temp_table}->{active_table}")
         # TODO: ideally some validation happens before the drop
-        #       - counts are within expected difference range
-        #       - geometries are valid
+        #       - [x] counts are within expected difference range
+        #       - [ ] geometries are valid
         #       - etc.
         #       -> move all validation to new _validate_hotswap() method
         if max_count_diff is not None:
@@ -1569,8 +1596,8 @@ class Postgres(object):
 
         # Rename active to dated table name
         outdated_table = f"{active_table}_{old_table_suffix}"
-        if self.table_exists(table=outdated_table, schema=schema):
-            self.drop_table(outdated_table, schema=schema, cascade=True)
+        if self.table_or_view_exists(database_object=outdated_table, schema=schema):
+            self.drop_table_or_view(database_object=outdated_table, schema=schema, cascade=True)
         self.rename_table(existing_table=active_table, new_table=outdated_table, schema=schema)
 
         # Rename temp table to active table
