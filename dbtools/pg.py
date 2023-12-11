@@ -1574,7 +1574,7 @@ class Postgres(object):
         old_table_suffix: str = "outdated",
         drop_old: bool = False,
     ):
-        """Replaces an one table with another.
+        """Replaces one table with another.
 
         After validating that both tables exist, drops the "active_table"
         and then renames the "temp_table" to have the name that the
