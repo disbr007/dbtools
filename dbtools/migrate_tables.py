@@ -1,5 +1,4 @@
 import logging
-import pathlib
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -130,7 +129,7 @@ def migrate_table(
         success = False
 
     # Cleanup
-    pathlib.unlink(dump_file)
+    Path.unlink(dump_file)
 
     return success
 
