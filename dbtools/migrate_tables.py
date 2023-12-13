@@ -213,10 +213,10 @@ def migrate_tables(
     source_database: List[str],
     source_schema: List[str],
     source_tables: List[str],
-    dest_host: List[str],
-    dest_database: List[str],
-    dest_schema: List[str],
-    dest_tables: List[str],
+    dest_host: List[str] = None,
+    dest_database: List[str] = None,
+    dest_schema: List[str] = None,
+    dest_tables: List[str] = None,
     dryrun: bool = False,
 ):
     """Migrate database tables from one host to another.
