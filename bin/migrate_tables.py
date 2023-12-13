@@ -1,17 +1,11 @@
 import logging
-import subprocess
-import sys
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from subprocess import PIPE
 from typing import List
 
 import typer
-from tqdm import tqdm
 
 from dbtools.constants import LOGS_DIR
-from dbtools.pg import Postgres
 from dbtools.migrate_tables import migrate_tables
 
 logger = logging.getLogger()
