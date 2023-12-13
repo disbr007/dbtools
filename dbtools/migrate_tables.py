@@ -1,4 +1,5 @@
 import logging
+import pathlib
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -59,7 +60,7 @@ def migrate_table(
             return success
 
     logger.info(f"Migrating {source_table} -> {dest_table}")
-    dump_file = f"{source_table.table}.sql"
+    dump_file = LOGS_DIR / f"{source_table.table}.sql"
     all_commands = []
     dump_cmd = [
         "pg_dump",
@@ -127,6 +128,9 @@ def migrate_table(
         logger.info(migrate_cmd)
         logger.info("--dryrun--")
         success = False
+
+    # Cleanup
+    pathlib.unlink(dump_file)
 
     return success
 
@@ -232,6 +236,12 @@ def migrate_tables(
     if username is None:
         logger.error("No username provided.")
         sys.exit(-1)
+    # Set any missing arguments to empty lists
+    dest_host = dest_host if dest_host is not None else []
+    dest_database = dest_database if dest_database is not None else []
+    dest_schema = dest_schema if dest_schema is not None else []
+    dest_tables = dest_tables if dest_tables is not None else []
+
     if Path(source_tables[0]).exists():
         with open(source_tables[0], "r") as src:
             source_tables = []
