@@ -38,10 +38,8 @@ def run_subprocess(command: str, shell: bool = True):
         proc_err.append(line.decode().strip())
     if proc_err:
         logger.debug("(subprocess) {}".format(proc_err))
-    # output, error = proc.communicate()
-    # logger.debug('Output: {}'.format(output.decode()))
-    # logger.debug('Err: {}'.format(error.decode()))
-    return proc_out, proc_err
+    proc.communicate()
+    return proc.returncode, proc_out, proc_err
 
 
 def migrate_table(
@@ -59,7 +57,7 @@ def migrate_table(
             return success
 
     logger.info(f"Migrating {source_table} -> {dest_table}")
-    dump_file = LOGS_DIR / f"{source_table.table}.sql"
+    dump_file = str(LOGS_DIR / f"{source_table.table}.sql")
     all_commands = []
     dump_cmd = [
         "pg_dump",
@@ -120,14 +118,12 @@ def migrate_table(
 
     if not dryrun:
         logger.debug(migrate_cmd)
-        out, err = run_subprocess(migrate_cmd)
+        return_code, out, err = run_subprocess(migrate_cmd)
         logger.info(f"\nOutput:\n{out}\nErr:\n{err}")
-        success = True
     else:
         logger.info(migrate_cmd)
         logger.info("--dryrun--")
-        success = False
-
+    success = bool(return_code)
     # Cleanup
     Path.unlink(dump_file)
 
@@ -305,3 +301,6 @@ def migrate_tables(
 
     if dryrun is not True:
         write_logs(successful_migrations, failed_migrations)
+
+    # Return whether completely successful run or not
+    return True if len(failed_migrations) == 0 else False
