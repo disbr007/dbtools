@@ -303,5 +303,5 @@ def migrate_tables(
     if dryrun is not True:
         write_logs(successful_migrations, failed_migrations)
 
-    # Return whether completely successful run or not~
+    # Return whether completely successful run or not
     return True if len(failed_migrations) == 0 else False
