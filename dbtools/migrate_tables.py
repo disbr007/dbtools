@@ -123,7 +123,8 @@ def migrate_table(
     else:
         logger.info(migrate_cmd)
         logger.info("--dryrun--")
-    success = bool(return_code)
+    success = True if return_code == 0 else False
+
     # Cleanup
     Path.unlink(dump_file)
 
@@ -302,5 +303,5 @@ def migrate_tables(
     if dryrun is not True:
         write_logs(successful_migrations, failed_migrations)
 
-    # Return whether completely successful run or not
+    # Return whether completely successful run or not~
     return True if len(failed_migrations) == 0 else False
