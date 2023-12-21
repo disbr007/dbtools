@@ -79,6 +79,10 @@ inline-quotes = "double"
 multiline-quotes = "double"
 
 # [tool.ruff.pycodestyle]
+[tool.ruff.flake8-bugbear]
+# Allow default arguments like, e.g., `data: List[str] = fastapi.Query(None)`.
+extend-immutable-calls = ["typer.Option", "typer.Argument"]
+
 
 [tool.pytest.ini_options]
 filterwarnings = [

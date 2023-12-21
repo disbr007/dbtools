@@ -446,7 +446,10 @@ class Postgres(object):
             "WHERE relname = {relname} AND nspname = {schema}; "
         ).format(relname=sql.Literal(relname), schema=sql.Literal(schema))
         results = self.execute_sql(relkind_sql)
-        if len(results) > 1:
+        if len(results) == 0:
+            logger.error(f"No results found for relname {schema}.{relname}")
+            return None
+        elif len(results) > 1:
             logger.error(f"More than one result found for relname: {schema}.{relname}")
         return results[0][0]
 
@@ -1605,7 +1608,7 @@ class Postgres(object):
 
         # Drop old table if requested
         if drop_old:
-            self.drop_table(table=outdated_table, schema=schema)
+            self.drop_table_or_view(database_object=outdated_table, schema=schema)
         # TODO: Ideally more validation, rollback if needed
         return 1
 
