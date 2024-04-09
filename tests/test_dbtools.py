@@ -140,11 +140,11 @@ class TestPostgres:
             check.is_false(cxn.closed)
         check.is_true(cxn.closed)
 
-    def test_engine(self, db_src):
+    def test_engine(self, db_src: Postgres):
         engine = db_src.get_engine()
-        began = engine.begin()
-        cxn = began.conn
-        check.is_false(cxn.closed)
+        connection = engine.connect()
+        logger.info(connection.info)
+        check.is_false(connection.closed)
 
     @pytest.mark.parametrize(
         "relname,expected_relkind",
