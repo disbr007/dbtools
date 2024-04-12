@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import os
+import urllib
 from pathlib import Path
 from typing import Literal, List, Union, Optional, Tuple
 
@@ -405,8 +406,9 @@ class Postgres(object):
     def get_engine(self):
         """Create sqlalchemy.engine object."""
         if self.password is not None:
+            passwd = urllib.parse.quote(self.password)
             cxn_str = (
-                f"postgresql+psycopg2://{self.user}:{self.password}@{self.host}/{self.database}"
+                f"postgresql+psycopg2://{self.user}:{passwd}@{self.host}/{self.database}"
             )
         else:
             cxn_str = f"postgresql+psycopg2://{self.user}@{self.host}/{self.database}"
