@@ -16,7 +16,7 @@ from psycopg2 import sql
 from pyproj import CRS
 from pyproj.exceptions import CRSError
 import shapely
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, Engine
 import sqlalchemy
 from tqdm import tqdm
 
@@ -321,7 +321,7 @@ class Postgres(object):
         database: str = None,
         user: str = None,
         password: str = None,
-        connection_profile: str = None,
+        connect_args: dict = None
     ):
         self.host = host
         self.port = port
@@ -329,8 +329,10 @@ class Postgres(object):
         self.user = user
         self.password = password
 
-        self.connection_profile = connection_profile
-        self._connection_config = None
+        if connect_args is None:
+            connect_args = {}
+        self.connect_args: dict = connect_args
+        self._engine: Engine = None
         self._connection = None
         self._cursor = None
         self._py2sql_types = {
@@ -402,7 +404,13 @@ class Postgres(object):
 
         return self._cursor
 
-    def get_engine(self):
+    @property
+    def engine(self) -> Engine:
+        if self._engine is None:
+            self._engine = self.get_engine()
+        return self._engine
+
+    def get_engine(self) -> Engine:
         """Create sqlalchemy.engine object."""
         if self.password is not None:
             cxn_str = (
@@ -410,7 +418,7 @@ class Postgres(object):
             )
         else:
             cxn_str = f"postgresql+psycopg2://{self.user}@{self.host}/{self.database}"
-        engine = create_engine(cxn_str)
+        engine = create_engine(cxn_str, connect_args=self.connect_args)
 
         return engine
 
@@ -420,6 +428,7 @@ class Postgres(object):
             "postgresql+psycopg2://" "{user}:{password}@{host}/{database}".format(**self.db_config),
             pool_size=pool_size,
             max_overflow=max_overflow,
+            connect_args=self.connect_args
         )
 
         return engine
@@ -682,13 +691,13 @@ class Postgres(object):
             # Check for GeoDataFrame must be first because GDFs are DFs as well
             if isinstance(df, gpd.GeoDataFrame):
                 df.to_postgis(
-                    name=table_name, schema=schema_name, con=self.get_engine(), index=index
+                    name=table_name, schema=schema_name, con=self.engine, index=index
                 )
             elif isinstance(df, pd.DataFrame):
                 df.to_sql(
                     name=table_name,
                     schema=schema_name,
-                    con=self.get_engine(),
+                    con=self.engine,
                     if_exists=FAIL,
                     index=index,
                     dtype=dtype,
@@ -869,7 +878,7 @@ class Postgres(object):
         if isinstance(sql_str, sql.Composed):
             sql_str = sql_str.as_string(self.connection)
         gdf = gpd.GeoDataFrame.from_postgis(
-            sql=sql_str, con=self.get_engine().connect(), geom_col=geom_col, crs=crs
+            sql=sql_str, con=self.engine.connect(), geom_col=geom_col, crs=crs
         )
         return gdf
 
@@ -880,7 +889,7 @@ class Postgres(object):
         if isinstance(columns, str):
             columns = [columns]
 
-        df = pd.read_sql(sql=sql_str, con=self.get_engine().connect(), columns=columns, **kwargs)
+        df = pd.read_sql(sql=sql_str, con=self.engine.connect(), columns=columns, **kwargs)
 
         return df
 
@@ -977,7 +986,7 @@ class Postgres(object):
         if schema:
             logger.info(f"In schema: {schema}")
         if not con:
-            con = self.get_engine()
+            con = self.engine
         te, se = self.prep_db_for_upload(
             df=df, table=table, schema=schema, dtype=dtype, dryrun=dryrun
         )
@@ -1050,9 +1059,13 @@ class Postgres(object):
             logger.info(f"Inserting {len(gdf):,} records into {table}...")
             if not con:
                 if pool_size:
-                    con = self.get_engine_pools(pool_size=pool_size, max_overflow=max_overflow)
+                    con = self.get_engine_pools(
+                        pool_size=pool_size,
+                        max_overflow=max_overflow,
+                        connect_args=self.connect_args
+                        )
                 else:
-                    con = self.get_engine()
+                    con = self.engine
 
             gdf.to_postgis(
                 name=table,
