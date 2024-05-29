@@ -16,7 +16,8 @@ from psycopg2 import sql
 from pyproj import CRS
 from pyproj.exceptions import CRSError
 import shapely
-from sqlalchemy import create_engine, Engine
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 import sqlalchemy
 from tqdm import tqdm
 
