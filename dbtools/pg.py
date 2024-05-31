@@ -70,7 +70,10 @@ def load_pgconfig(host: str = None) -> PGConfig:
     pgpassfile = os.environ.get("PGPASSFILE", Path.home() / ".pgpass")
     try:
         with open(pgpassfile, "r") as src:
+            logger.info("using pgpassfile")
             connection_configs = [cc.strip().split(":") for cc in src.readlines()]
+            logger.info(f"len connection configs: {len(connection_configs)}")
+            logger.info(f"connection configs: {connection_configs}")
     except FileNotFoundError:
         logger.debug("pgpass file not found, reading from environmental variables.")
         connection_configs = []
@@ -80,18 +83,22 @@ def load_pgconfig(host: str = None) -> PGConfig:
             host=pghost, port=pgport, database=pgdatabase, user=pguser, password=pgpassword
         )
     else:
-        configs = {
-            host: PGConfig(
+        logger.info(f"connection configs: {connection_configs} {len(connection_configs)}")
+        configs = {}
+        for host, port, database, user, *password in connection_configs:
+            if len(password) == 1:
+                password = password[0]
+            configs[host] = PGConfig(
                 host=host if pghost is None else pghost,
                 port=port if pgport is None else pgport,
                 database=database if pgdatabase is None else pgdatabase,
                 user=user if pguser is None else pguser,
                 password=password if pgpassword is None else pgpassword,
             )
-            for host, port, database, user, password in connection_configs
-        }
         pgconfig = configs.get(pghost)
-
+    if pgconfig is None:
+        raise KeyError(f"Error retrieving config for host: {pghost}. Available hosts: "
+                       f"{configs.keys()}")
     return pgconfig
 
 
